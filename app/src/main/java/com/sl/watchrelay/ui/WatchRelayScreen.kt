@@ -62,6 +62,7 @@ fun WatchRelayScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var notificationAccess by remember { mutableStateOf(sessionProbe.hasNotificationAccess()) }
+    var initialRouteApplied by remember { mutableStateOf(false) }
 
     fun refresh() {
         scope.launch {
@@ -84,6 +85,10 @@ fun WatchRelayScreen(
                 snapshot = it
                 notificationAccess = sessionProbe.hasNotificationAccess()
                 error = null
+                if (!initialRouteApplied) {
+                    section = if (it.onboardingCompleted) AppSection.HOME else AppSection.SETUP
+                    initialRouteApplied = true
+                }
             }
             .onFailure { error = it.message ?: it.javaClass.simpleName }
         busy = false
@@ -118,6 +123,26 @@ fun WatchRelayScreen(
                     }
                 },
                 onSetup = { section = AppSection.SETUP },
+                onConfirmMatch = { eventId, candidateIndex ->
+                    scope.launch {
+                        busy = true
+                        runCatching { repository.confirmMatch(eventId, candidateIndex) }
+                            .onSuccess { error = null }
+                            .onFailure { error = it.message ?: it.javaClass.simpleName }
+                        busy = false
+                        refresh()
+                    }
+                },
+                onDismissMatch = { eventId ->
+                    scope.launch {
+                        busy = true
+                        runCatching { repository.dismissMatch(eventId) }
+                            .onSuccess { error = null }
+                            .onFailure { error = it.message ?: it.javaClass.simpleName }
+                        busy = false
+                        refresh()
+                    }
+                },
             )
 
             AppSection.SETUP -> SetupSection(
@@ -214,11 +239,8 @@ private fun SectionNavigation(
 
 @Composable
 private fun NavButton(label: String, selected: Boolean, onClick: () -> Unit) {
-    if (selected) {
-        Button(onClick = onClick) { Text(label) }
-    } else {
-        OutlinedButton(onClick = onClick) { Text(label) }
-    }
+    if (selected) Button(onClick = onClick) { Text(label) }
+    else OutlinedButton(onClick = onClick) { Text(label) }
 }
 
 @Composable
@@ -228,6 +250,8 @@ private fun HomeSection(
     onRefresh: () -> Unit,
     onSync: () -> Unit,
     onSetup: () -> Unit,
+    onConfirmMatch: (String, Int) -> Unit,
+    onDismissMatch: (String) -> Unit,
 ) {
     val state = snapshot
     Text("Status", style = MaterialTheme.typography.titleLarge)
@@ -236,6 +260,7 @@ private fun HomeSection(
     Text("Pending sync: ${state?.pendingCount ?: 0}")
     Text("Needs authentication: ${state?.authRequiredCount ?: 0}")
     Text("Failed: ${state?.failedCount ?: 0}")
+    Text("Matches to confirm: ${state?.matchAttention?.size ?: 0}")
 
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(onClick = onRefresh) { Text("Refresh") }
@@ -245,26 +270,47 @@ private fun HomeSection(
         }
     }
 
-    if (state?.attention?.isNotEmpty() == true) {
+    if (state?.matchAttention?.isNotEmpty() == true || state?.attention?.isNotEmpty() == true) {
         HorizontalDivider()
         Text("Needs attention", style = MaterialTheme.typography.titleLarge)
-        state.attention.forEach { item ->
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("${item.state} · ${shortId(item.eventId)}", style = MaterialTheme.typography.titleMedium)
-                Text("Attempts: ${item.attempts}")
-                item.message?.takeIf(String::isNotBlank)?.let { Text(it) }
+    }
+
+    state?.matchAttention.orEmpty().forEach { item ->
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(item.itemKey, style = MaterialTheme.typography.titleMedium)
+            Text(formatTime(item.watchedAtMs))
+            Text(item.reason)
+            if (state?.authenticated != true) {
+                Text("Reconnect MyShows before confirming a match.")
             }
+            item.candidates.forEachIndexed { index, candidate ->
+                OutlinedButton(
+                    enabled = state?.authenticated == true,
+                    onClick = { onConfirmMatch(item.eventId, index) },
+                ) {
+                    Text("Use ${candidateLabel(candidate)}")
+                }
+            }
+            OutlinedButton(onClick = { onDismissMatch(item.eventId) }) {
+                Text("Ignore this watch")
+            }
+        }
+        HorizontalDivider()
+    }
+
+    state?.attention.orEmpty().forEach { item ->
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("${item.state} · ${shortId(item.eventId)}", style = MaterialTheme.typography.titleMedium)
+            Text("Attempts: ${item.attempts}")
+            item.message?.takeIf(String::isNotBlank)?.let { Text(it) }
         }
     }
 
     HorizontalDivider()
     Text("Recent history", style = MaterialTheme.typography.titleLarge)
     val recent = state?.history.orEmpty().take(5)
-    if (recent.isEmpty()) {
-        Text("No tracked watches yet.")
-    } else {
-        recent.forEach { HistorySummary(it, showUndo = false, onUndo = {}) }
-    }
+    if (recent.isEmpty()) Text("No tracked watches yet.")
+    else recent.forEach { HistorySummary(it, showUndo = false, onUndo = {}) }
 }
 
 @Composable
@@ -356,9 +402,7 @@ private fun HistorySummary(
         Text(item.itemKey, style = MaterialTheme.typography.titleMedium)
         Text("${item.remoteType.name.lowercase()} #${item.remoteId} · viewed ${item.viewedPercent}%")
         Text("${formatTime(item.watchedAtMs)} · ${formatSyncState(item.syncState)}")
-        if (showUndo) {
-            OutlinedButton(onClick = onUndo) { Text("Undo watched mark") }
-        }
+        if (showUndo) OutlinedButton(onClick = onUndo) { Text("Undo watched mark") }
     }
 }
 
@@ -459,6 +503,15 @@ private fun DiagnosticsSection(
     HorizontalDivider()
     Text("External-player intent probe")
     Text("The existing sanitized video intent handler remains registered for LMD/external-player investigation. It never persists the playback URI.")
+}
+
+private fun candidateLabel(candidate: MvpMatchCandidate): String = buildString {
+    append(candidate.title ?: candidate.originalTitle ?: "candidate")
+    candidate.year?.let { append(" ($it)") }
+    if (candidate.season != null && candidate.episode != null) {
+        append(" S%02dE%02d".format(candidate.season, candidate.episode))
+    }
+    append(" · ${candidate.confidence}%")
 }
 
 private fun formatSyncState(state: HistorySyncState): String = when (state) {
