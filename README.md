@@ -72,18 +72,25 @@ Actual support is recorded only after real-device validation. See [Compatibility
 
 ## Current technical proof
 
-The repository contains a minimal Phase 0 Android diagnostic app, the playback core, and the first durable synchronization layer. Automatic tracking is not wired into a production flow yet. The current build provides:
+The repository contains a minimal Phase 0 Android diagnostic app, the playback core, durable synchronization, and the conservative content-matching core. Automatic tracking is not yet wired into a complete production UI flow. The current build provides:
 
 - MediaSession inspection after the user grants Android notification-listener access;
 - sanitized inspection of `video/*` intents sent to WatchRelay as an external-player handler;
 - a MyShows Free diagnostic flow for authentication, movie watched/undo, and episode watched/undo without Pro scrobble endpoints;
 - deterministic playback-session accounting based on actual viewed intervals, with conservative seek detection, pause/resume, playback speed, duplicate/stale callback protection, stop/replay handling, autoplay item transitions, and an 80% default watched threshold;
-- Room-backed local watch history and durable pending-sync queue with atomic history/enqueue writes;
+- Room-backed local watch history and durable pending-sync queue with atomic history/enqueue and terminal-outcome writes;
 - deterministic local sync-operation IDs, retryable/auth-required/permanent-failure states, and explicit movie/episode undo operations;
 - WorkManager network-constrained synchronization with exponential backoff and startup recovery after process restart;
 - Android Keystore-backed AES-256-GCM tracker-token storage;
+- metadata normalization for common movie/episode labels and filenames, including season/episode coordinates and release-noise cleanup;
+- MyShows movie/show/episode resolution with IMDb/Kinopoisk external IDs first and conservative title/year fallback;
+- confidence-based matching with explicit `confirmed`, `ambiguous`, and `unresolved` outcomes; low-confidence or competing candidates cannot auto-sync;
+- persistent local user-confirmed mappings for ambiguous items, with fresh remote previous-state lookup before every synchronized mark so undo does not rely on stale state;
+- deterministic matcher tests plus sanitized MyShows response fixtures;
 - Android phone/tablet and Android TV/Google TV launcher entry points;
 - CI verification for unit tests, lint, a debug build, signed release AAB/APK builds, and Google Play packaging constraints.
+
+The UI for selecting an ambiguous match is intentionally part of the Android MVP phase. Until that UI exists, the matching core exposes candidates and a programmatic confirm/forget path without silently guessing.
 
 Follow [Phase 0 testing](docs/PHASE0-TESTING.md) for real-device validation. Until results are recorded there and in the compatibility matrix, no LMD/player path is advertised as supported.
 
@@ -140,7 +147,7 @@ The project begins with a technical proof before the product UI:
 2. Validate the complete free-account MyShows movie/episode write flow.
 3. Build the playback/session core and durable local sync queue.
 4. Build conservative content matching.
-5. Ship the Android MVP.
+5. Ship the Android MVP, including ambiguous-match resolution UI.
 6. Complete Android TV/Google TV UX and pairing.
 7. Build a tested compatibility matrix and harden reliability.
 8. Public beta, then v1.0.
