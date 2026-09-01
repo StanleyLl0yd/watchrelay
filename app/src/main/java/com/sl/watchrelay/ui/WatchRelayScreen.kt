@@ -78,6 +78,17 @@ fun WatchRelayScreen(
         }
     }
 
+    fun runMatchAction(action: suspend () -> Unit) {
+        scope.launch {
+            busy = true
+            runCatching { action() }
+                .onSuccess { error = null }
+                .onFailure { error = it.message ?: it.javaClass.simpleName }
+            busy = false
+            refresh()
+        }
+    }
+
     LaunchedEffect(resumeVersion) {
         busy = true
         runCatching { repository.snapshot() }
@@ -123,26 +134,11 @@ fun WatchRelayScreen(
                     }
                 },
                 onSetup = { section = AppSection.SETUP },
+                onRetryMatch = { eventId -> runMatchAction { repository.retryMatch(eventId) } },
                 onConfirmMatch = { eventId, candidateIndex ->
-                    scope.launch {
-                        busy = true
-                        runCatching { repository.confirmMatch(eventId, candidateIndex) }
-                            .onSuccess { error = null }
-                            .onFailure { error = it.message ?: it.javaClass.simpleName }
-                        busy = false
-                        refresh()
-                    }
+                    runMatchAction { repository.confirmMatch(eventId, candidateIndex) }
                 },
-                onDismissMatch = { eventId ->
-                    scope.launch {
-                        busy = true
-                        runCatching { repository.dismissMatch(eventId) }
-                            .onSuccess { error = null }
-                            .onFailure { error = it.message ?: it.javaClass.simpleName }
-                        busy = false
-                        refresh()
-                    }
-                },
+                onDismissMatch = { eventId -> runMatchAction { repository.dismissMatch(eventId) } },
             )
 
             AppSection.SETUP -> SetupSection(
@@ -250,6 +246,7 @@ private fun HomeSection(
     onRefresh: () -> Unit,
     onSync: () -> Unit,
     onSetup: () -> Unit,
+    onRetryMatch: (String) -> Unit,
     onConfirmMatch: (String, Int) -> Unit,
     onDismissMatch: (String) -> Unit,
 ) {
@@ -260,7 +257,7 @@ private fun HomeSection(
     Text("Pending sync: ${state?.pendingCount ?: 0}")
     Text("Needs authentication: ${state?.authRequiredCount ?: 0}")
     Text("Failed: ${state?.failedCount ?: 0}")
-    Text("Matches to confirm: ${state?.matchAttention?.size ?: 0}")
+    Text("Matches to resolve: ${state?.matchAttention?.size ?: 0}")
 
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(onClick = onRefresh) { Text("Refresh") }
@@ -281,14 +278,23 @@ private fun HomeSection(
             Text(formatTime(item.watchedAtMs))
             Text(item.reason)
             if (state?.authenticated != true) {
-                Text("Reconnect MyShows before confirming a match.")
+                Text("Reconnect MyShows before resolving this watch.")
             }
-            item.candidates.forEachIndexed { index, candidate ->
-                OutlinedButton(
+            if (item.candidates.isEmpty()) {
+                Button(
                     enabled = state?.authenticated == true,
-                    onClick = { onConfirmMatch(item.eventId, index) },
+                    onClick = { onRetryMatch(item.eventId) },
                 ) {
-                    Text("Use ${candidateLabel(candidate)}")
+                    Text("Retry matching")
+                }
+            } else {
+                item.candidates.forEachIndexed { index, candidate ->
+                    OutlinedButton(
+                        enabled = state?.authenticated == true,
+                        onClick = { onConfirmMatch(item.eventId, index) },
+                    ) {
+                        Text("Use ${candidateLabel(candidate)}")
+                    }
                 }
             }
             OutlinedButton(onClick = { onDismissMatch(item.eventId) }) {
