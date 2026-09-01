@@ -1,6 +1,7 @@
 package com.sl.watchrelay.ui
 
 import android.content.Intent
+import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -29,6 +29,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.sl.watchrelay.BuildConfig
+import com.sl.watchrelay.diagnostics.DiagnosticReport
+import com.sl.watchrelay.diagnostics.DiagnosticReportData
 import com.sl.watchrelay.playback.MediaSessionProbe
 import com.sl.watchrelay.playback.MediaSessionSnapshot
 import com.sl.watchrelay.settings.AppSettings
@@ -182,7 +185,11 @@ fun WatchRelayScreen(
                 },
             )
 
-            AppSection.DIAGNOSTICS -> DiagnosticsSection(sessionProbe)
+            AppSection.DIAGNOSTICS -> DiagnosticsSection(
+                sessionProbe = sessionProbe,
+                snapshot = snapshot,
+                notificationAccess = notificationAccess,
+            )
         }
     }
 }
@@ -383,7 +390,12 @@ private fun SettingsSection(
 }
 
 @Composable
-private fun DiagnosticsSection(sessionProbe: MediaSessionProbe) {
+private fun DiagnosticsSection(
+    sessionProbe: MediaSessionProbe,
+    snapshot: MvpSnapshot?,
+    notificationAccess: Boolean,
+) {
+    val context = LocalContext.current
     var sessions by remember { mutableStateOf<List<MediaSessionSnapshot>>(emptyList()) }
     var status by remember { mutableStateOf("Not scanned yet") }
 
@@ -412,6 +424,36 @@ private fun DiagnosticsSection(sessionProbe: MediaSessionProbe) {
             Text("Position: ${formatDuration(session.positionMs)} / ${formatDuration(session.durationMs)}")
             Text("Metadata keys: ${session.metadataKeys.joinToString().ifBlank { "—" }}")
         }
+    }
+
+    HorizontalDivider()
+    Text("Safe diagnostic export", style = MaterialTheme.typography.titleMedium)
+    Text("The exported report contains app/device and aggregate state only. Titles, media metadata, history content, credentials and playback URLs are excluded.")
+    Button(
+        enabled = snapshot != null,
+        onClick = {
+            val state = snapshot ?: return@Button
+            val report = DiagnosticReport.build(
+                DiagnosticReportData(
+                    appVersion = BuildConfig.VERSION_NAME,
+                    sdkInt = Build.VERSION.SDK_INT,
+                    device = "${Build.MANUFACTURER} ${Build.MODEL}",
+                    notificationAccess = notificationAccess,
+                    myShowsConnected = state.authenticated,
+                    pendingSyncCount = state.pendingCount,
+                    authRequiredCount = state.authRequiredCount,
+                    failedSyncCount = state.failedCount,
+                    watchedThresholdPercent = state.watchedThresholdPercent,
+                ),
+            )
+            val intent = Intent(Intent.ACTION_SEND)
+                .setType("text/plain")
+                .putExtra(Intent.EXTRA_SUBJECT, "WatchRelay diagnostics")
+                .putExtra(Intent.EXTRA_TEXT, report)
+            context.startActivity(Intent.createChooser(intent, "Share WatchRelay diagnostics"))
+        },
+    ) {
+        Text("Share redacted report")
     }
 
     HorizontalDivider()
