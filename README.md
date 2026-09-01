@@ -68,6 +68,20 @@ The initial technical validation covers:
 
 Actual support is recorded only after real-device validation. See [Compatibility](docs/COMPATIBILITY.md).
 
+## Current technical proof
+
+The repository now contains a minimal Phase 0 Android diagnostic app. It intentionally does not implement automatic watched-state tracking yet. The current build provides:
+
+- MediaSession inspection after the user grants Android notification-listener access;
+- sanitized inspection of `video/*` intents sent to WatchRelay as an external-player handler;
+- a MyShows Free diagnostic flow for authentication, movie watched/undo, and episode watched/undo without Pro scrobble endpoints;
+- Android phone/tablet and Android TV/Google TV launcher entry points;
+- CI verification for unit tests, lint, and a debug build.
+
+Follow [Phase 0 testing](docs/PHASE0-TESTING.md) for real-device validation. Until results are recorded there and in the compatibility matrix, no LMD/player path is advertised as supported.
+
+The current build configuration uses JDK 17, Android API 37, Kotlin 2.4.10, Android Gradle Plugin 9.3.1, Gradle 9.5.0 in CI, and the stable Compose August 2026 BOM. A checked-in Gradle wrapper will be added once generated from the pinned Gradle version; CI currently installs that exact Gradle version explicitly.
+
 ## Product principles
 
 - **Free:** no WatchRelay subscription and no required MyShows Pro subscription.
@@ -105,7 +119,7 @@ See [Architecture](docs/ARCHITECTURE.md) for boundaries and design constraints.
 
 ## Roadmap
 
-The project begins with a technical proof before UI work:
+The project begins with a technical proof before the product UI:
 
 1. Validate LMD/player metadata and MediaSession behavior on real Android and TV devices.
 2. Validate the complete free-account MyShows movie/episode write flow.
@@ -122,6 +136,7 @@ See [Roadmap](docs/ROADMAP.md) for release gates and detailed phases.
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Roadmap](docs/ROADMAP.md)
+- [Phase 0 testing](docs/PHASE0-TESTING.md)
 - [Compatibility](docs/COMPATIBILITY.md)
 - [Privacy](PRIVACY.md)
 - [Security](SECURITY.md)

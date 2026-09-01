@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">WatchRelay</string>
+    <string name="notification_access_label">WatchRelay media session access</string>
+    <string name="intent_probe_title">WatchRelay Intent Probe</string>
+</resources>
