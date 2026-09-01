@@ -95,7 +95,7 @@ A completed watch survives process death/offline state, remains durably queued, 
 
 Goal: identify content conservatively and make errors repairable.
 
-Implementation status: **implemented in PR #10 and undergoing final release-gate verification**.
+Implementation status: **implemented and covered by deterministic release-gate tests; product-facing ambiguous-match UI remains part of v0.4**.
 
 Implemented work:
 
