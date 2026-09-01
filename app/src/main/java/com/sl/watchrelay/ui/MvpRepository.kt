@@ -85,9 +85,9 @@ class MvpRepository(
             failedCount = dao.failedCount(),
             watchedThresholdPercent = settings.watchedThresholdPercent,
             onboardingCompleted = settings.onboardingCompleted,
-            history = dao.recentHistory(HISTORY_LIMIT).map(WatchHistoryEntity::toMvp),
-            attention = dao.attentionItems(ATTENTION_LIMIT).map(PendingSyncEntity::toMvp),
-            matchAttention = completedWatchResolver.pending().map(PendingMatch::toMvp),
+            history = dao.recentHistory(HISTORY_LIMIT).map { it.toMvp() },
+            attention = dao.attentionItems(ATTENTION_LIMIT).map { it.toMvp() },
+            matchAttention = completedWatchResolver.pending().map { it.toMvp() },
         )
     }
 
@@ -160,7 +160,7 @@ class MvpRepository(
         itemKey = itemKey,
         watchedAtMs = watchedAtMs,
         reason = reason,
-        candidates = candidates.map(ContentMatchCandidate::toMvp),
+        candidates = candidates.map { it.toMvp() },
     )
 
     private fun ContentMatchCandidate.toMvp() = MvpMatchCandidate(
