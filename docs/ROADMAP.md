@@ -72,17 +72,17 @@ Core tests cover normal play, pause/resume, forward/backward seek, duplicate cal
 
 Goal: never lose a valid watch event because the app or network disappears.
 
-Implementation status: **implemented in the persistence/sync branch and under final release-gate verification**.
+Implementation status: **complete, merged to `main`, and published in technical-preview release `v0.2.0`**.
 
-Planned work:
+Implemented work:
 
 - local history;
 - durable pending-sync queue;
 - retry/backoff;
-- idempotency;
+- local idempotency and convergent remote retries;
 - WorkManager integration;
-- authentication-expiry state;
-- undo model;
+- authentication-expiry state and recovery;
+- conservative undo model;
 - secret storage backed by Android Keystore.
 
 Synchronization semantics are durable **at-least-once state synchronization**. WatchRelay prevents duplicate local enqueue operations. If the process dies after MyShows accepts a mutation but before local success is committed, the same state-setting request can be retried because MyShows does not expose a server-side idempotency key. Equivalent retries must therefore be safe and converge on the same remote state.
@@ -95,21 +95,27 @@ A completed watch survives process death/offline state, remains durably queued, 
 
 Goal: identify content conservatively and make errors repairable.
 
-Planned work:
+Implementation status: **implemented and covered by deterministic release-gate tests; product-facing ambiguous-match UI remains part of v0.4**.
 
-- metadata normalizer;
+Implemented work:
+
+- metadata normalizer with common season/episode patterns and release-noise cleanup;
 - movie matching;
 - series/season/episode matching;
-- external-ID matching where available;
+- IMDb/Kinopoisk external-ID matching where available;
 - title/year fallback;
-- confidence model;
-- ambiguous-match workflow;
+- confidence model with explicit auto-confirm threshold and runner-up margin;
+- explicit ambiguous/unresolved outcomes that cannot auto-sync;
 - persistent user-confirmed mappings;
-- correction/undo path.
+- correction/forget path;
+- fresh previous MyShows state capture for safe undo;
+- sanitized MyShows response fixtures and deterministic matcher tests.
+
+Ambiguous-match selection UI is intentionally deferred to the Android MVP phase; the matching core already returns the candidates and persists an explicit user choice.
 
 ### Release gate
 
-Known unambiguous fixtures auto-match; deliberately ambiguous fixtures do not auto-sync; user corrections persist and are reused.
+Known unambiguous fixtures auto-match; deliberately ambiguous and title-only low-confidence fixtures do not auto-sync; user corrections persist and are reused; MyShows response parsing is covered by sanitized fixtures.
 
 ## v0.4 — Android MVP
 
@@ -124,6 +130,7 @@ Planned surfaces:
 - recent history;
 - pending/failed sync state;
 - items needing attention;
+- ambiguous-match selection/correction;
 - watched-threshold setting;
 - undo;
 - privacy/security information;
@@ -131,7 +138,7 @@ Planned surfaces:
 
 ### Release gate
 
-A new user can install, connect, grant required permissions, watch supported content, see the result, recover from a sync failure, and undo an incorrect mark without developer tools.
+A new user can install, connect, grant required permissions, watch supported content, see the result, recover from a sync failure, resolve an ambiguous match, and undo an incorrect mark without developer tools.
 
 ## v0.5 — Android TV / Google TV
 

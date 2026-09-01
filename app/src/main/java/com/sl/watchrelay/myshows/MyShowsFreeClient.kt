@@ -10,6 +10,23 @@ data class MovieState(
     val watchStatus: String?,
 )
 
+data class MyShowsCatalogItem(
+    val id: Int,
+    val title: String?,
+    val originalTitle: String?,
+    val year: Int?,
+    val imdbId: String?,
+    val kinopoiskId: String?,
+)
+
+data class MyShowsEpisode(
+    val showId: Int,
+    val episodeId: Int,
+    val seasonNumber: Int,
+    val episodeNumber: Int,
+    val title: String?,
+)
+
 class MyShowsHttpException(
     val statusCode: Int,
 ) : IOException("MyShows returned HTTP $statusCode")
@@ -35,6 +52,80 @@ class MyShowsFreeClient {
             ?: throw MyShowsApiException("MyShows did not return a session token")
     }
 
+    fun searchShows(query: String): Result<List<MyShowsCatalogItem>> = runCatching {
+        require(query.isNotBlank()) { "Search query is required" }
+        MyShowsResponseParser.catalogItems(
+            rpc(
+                token = null,
+                method = "shows.Search",
+                params = JSONObject().put("query", query.trim()),
+            ),
+            "shows",
+            "results",
+            "items",
+            "list",
+        )
+    }
+
+    fun searchMovies(query: String, year: Int?): Result<List<MyShowsCatalogItem>> = runCatching {
+        require(query.isNotBlank()) { "Search query is required" }
+        val search = JSONObject().put("query", query.trim())
+        if (year != null) search.put("year", year)
+        MyShowsResponseParser.catalogItems(
+            rpc(
+                token = null,
+                method = "movies.GetCatalog",
+                params = JSONObject()
+                    .put("search", search)
+                    .put("page", 1)
+                    .put("pageSize", 20),
+            ),
+            "shows",
+            "movies",
+            "results",
+            "items",
+            "list",
+        )
+    }
+
+    fun findByExternalId(source: String, id: String): Result<MyShowsCatalogItem?> = runCatching {
+        require(source in setOf("imdb", "kinopoisk")) { "Unsupported external ID source: $source" }
+        val normalized = when (source) {
+            "imdb" -> id.trim().lowercase().removePrefix("tt")
+            else -> id.trim()
+        }
+        val numericId = normalized.toLongOrNull() ?: return@runCatching null
+        MyShowsResponseParser.catalogItem(
+            rpc(
+                token = null,
+                method = "shows.GetByExternalId",
+                params = JSONObject().put("source", source).put("id", numericId),
+            ),
+        )
+    }
+
+    fun readShowEpisodes(showId: Int): Result<List<MyShowsEpisode>> = runCatching {
+        val result = rpcObject(
+            token = null,
+            method = "shows.GetById",
+            params = JSONObject()
+                .put("showId", showId)
+                .put("withEpisodes", true)
+                .put("withSeasonCounts", false),
+        )
+        MyShowsResponseParser.episodes(showId, result)
+    }
+
+    fun readProfileWatchedEpisodeIds(token: String, showId: Int): Result<Set<Int>> = runCatching {
+        MyShowsResponseParser.watchedEpisodeIds(
+            rpc(
+                token = token,
+                method = "profile.Episodes",
+                params = JSONObject().put("showId", showId),
+            ),
+        )
+    }
+
     fun readMovieState(token: String, movieId: Int): Result<MovieState> = runCatching {
         val result = rpcObject(
             token = token,
@@ -45,8 +136,8 @@ class MyShowsFreeClient {
                 .put("withSeasonCounts", false),
         )
         MovieState(
-            title = result.optString("title").takeIf(String::isNotBlank),
-            watchStatus = result.optString("watchStatus").takeIf(String::isNotBlank),
+            title = result.stringOrNull("title"),
+            watchStatus = result.stringOrNull("watchStatus"),
         )
     }
 
@@ -78,13 +169,20 @@ class MyShowsFreeClient {
         Unit
     }
 
-    private fun rpcObject(token: String, method: String, params: JSONObject): JSONObject {
+    private fun rpcObject(token: String?, method: String, params: JSONObject): JSONObject {
         val result = rpc(token, method, params)
         return result as? JSONObject ?: throw MyShowsApiException("Unexpected MyShows response for $method")
     }
 
-    private fun rpc(token: String, method: String, params: JSONObject): Any? {
-        require(token.isNotBlank()) { "Not authenticated" }
+    private fun rpc(token: String?, method: String, params: JSONObject): Any? {
+        val headers = if (token.isNullOrBlank()) {
+            emptyMap()
+        } else {
+            mapOf(
+                AUTH_HEADER to "Bearer $token",
+                STANDARD_AUTH_HEADER to "Bearer $token",
+            )
+        }
         val response = post(
             RPC_URL,
             JSONObject()
@@ -92,7 +190,7 @@ class MyShowsFreeClient {
                 .put("method", method)
                 .put("params", params)
                 .put("id", 1),
-            mapOf(AUTH_HEADER to "Bearer $token"),
+            headers,
         )
         response.optJSONObject("error")?.let {
             throw MyShowsApiException(it.optString("message", "MyShows request failed"))
@@ -102,6 +200,9 @@ class MyShowsFreeClient {
         }
         return response.opt("result")
     }
+
+    private fun JSONObject.stringOrNull(key: String): String? =
+        optString(key).takeIf { it.isNotBlank() && it != "null" }
 
     private fun post(
         endpoint: String,
@@ -134,6 +235,7 @@ class MyShowsFreeClient {
         const val SESSION_URL = "https://myshows.me/api/session"
         const val RPC_URL = "https://myshows.me/v3/rpc/"
         const val AUTH_HEADER = "authorization2"
+        const val STANDARD_AUTH_HEADER = "Authorization"
         const val TIMEOUT_MS = 15_000
         val MOVIE_STATUSES = setOf("finished", "later", "remove")
     }

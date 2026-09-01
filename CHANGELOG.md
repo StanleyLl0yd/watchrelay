@@ -4,7 +4,23 @@ All notable user-visible changes to WatchRelay will be documented in this file.
 
 ## Unreleased
 
-No changes yet.
+### Added
+
+- Conservative content-matching core for movies and episodes.
+- Playback metadata normalization with `SxxExx` / `NxNN` parsing, year extraction, and release-noise cleanup.
+- MyShows catalog lookup through ordinary public show/movie/external-ID operations without Pro scrobbling.
+- External-ID-first matching for IMDb and Kinopoisk identifiers when available.
+- Confidence-based title/year matching that refuses automatic synchronization when evidence is insufficient or competing candidates are too close.
+- Exact season/episode resolution after a show match.
+- Persistent local user-confirmed mappings for ambiguous matches, with explicit forget/correction support.
+- Fresh previous MyShows movie/episode state capture before synchronization so undo restores current pre-WatchRelay state rather than cached state.
+- Sanitized deterministic fixtures covering MyShows catalog/episode response parsing.
+- Unit coverage for normalizers, unambiguous and ambiguous matching, external IDs, title-only conservative behavior, episode resolution, mapping persistence/reuse, and mapping serialization.
+
+### Changed
+
+- Episode undo preparation now derives prior watched/unwatched state from the authenticated MyShows watched-episode list for the resolved show.
+- Content mappings remain outside the Room history/sync schema because they contain no secrets and do not justify a database migration at this stage.
 
 ## 0.2.0 - 2026-09-01
 

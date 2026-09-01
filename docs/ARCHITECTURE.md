@@ -2,7 +2,7 @@
 
 ## Status
 
-WatchRelay is in technical-validation stage. The playback-session core and first durable persistence/synchronization layer exist; playback-source adapters, production content matching, and product UI remain under development.
+WatchRelay is in technical-validation stage. The playback-session core, durable persistence/synchronization layer, and conservative content-matching core exist; playback-source adapters and product UI remain under development.
 
 ## Product boundary
 
@@ -121,37 +121,43 @@ The default watched threshold target is 80%, configurable by the user. Threshold
 
 ## Content matching
 
-The matcher converts source metadata into a tracker entity.
+The matcher converts source metadata into a tracker entity and is intentionally conservative. It is deterministic and testable without Android UI or network transport.
 
-Preferred evidence order:
+Current evidence order:
 
-1. stable external ID supplied by the source;
-2. IMDb or Kinopoisk ID where supported;
-3. original title + year;
-4. localized title + year;
-5. season/episode numbers for episodic content;
-6. normalized/fuzzy title matching as a fallback.
+1. a user-confirmed mapping for the exact normalized source signature;
+2. IMDb or Kinopoisk external ID when supplied by the playback source;
+3. normalized original/localized title plus year;
+4. exact season/episode coordinates inside a resolved show.
 
-The matcher must produce one of three outcomes:
+Common playback labels and filenames are normalized before matching. The normalizer extracts common `SxxExx` / `NxNN` coordinates, removes file extensions and common release-quality/codec noise, and normalizes punctuation/case/diacritics for comparison. Explicit structured metadata supplied by the playback source takes precedence over values parsed from a filename.
 
-- **confirmed** — safe to sync automatically;
-- **ambiguous** — require user choice;
-- **unresolved** — do not sync.
+The current title/year score is deliberately strict. Exact normalized title evidence is not sufficient by itself for automatic synchronization; an exact year raises an otherwise exact title match into the automatic-confirm range. Automatic confirmation also requires a margin over the runner-up candidate so equally plausible titles remain ambiguous. Unknown media type is unresolved instead of guessed as a movie.
 
-User-confirmed mappings should be persisted so the same source title does not repeatedly require confirmation.
+The matcher produces exactly one of three outcomes:
 
-Do not create broad heuristics that increase automatic coverage at the expense of correctness.
+- **confirmed** — evidence is strong enough to create a tracker target;
+- **ambiguous** — one or more plausible candidates exist but require explicit user choice;
+- **unresolved** — required evidence is missing or no safe candidate exists.
+
+For episodic content, resolving a show is not enough: the requested season and episode must exist exactly in that show's MyShows episode catalog. Missing or duplicate coordinates are not silently guessed.
+
+User-confirmed corrections are persisted locally using a deterministic signature of the normalized source metadata. The saved mapping stores only tracker identity; it does **not** cache previous remote watched state. Before a confirmed item is handed to synchronization, WatchRelay reads the current previous MyShows state again so later undo restores the state that existed immediately before WatchRelay's mutation.
+
+The current mapping set is small, contains no secrets, and does not justify expanding the Room schema. It is therefore stored in dedicated private `SharedPreferences` with synchronous persistence on an IO dispatcher. If future mapping requirements need querying, migrations, or richer relational data, moving mappings into Room can be reconsidered with an explicit migration.
+
+The Android MVP owns the ambiguous-selection UI. The matching core only exposes candidates and confirm/forget operations; UI code must not invent its own matching heuristics.
 
 ## Local persistence
 
-The current Android persistence layer uses Room 3 and stores only data needed for durable synchronization and local history. Current tables cover:
+The current Android persistence layer uses Room 3 and stores data needed for durable synchronization and local history. Current tables cover:
 
 - local watch history;
 - pending/retry synchronization operations;
 - previous remote state needed for undo;
 - synchronization/error state and attempt metadata.
 
-Future schema additions may include current/recent playback recovery data, content mappings, and user settings when those phases are implemented.
+Content mappings are currently persisted separately as described above. Future schema additions may include current/recent playback recovery data and user settings when those phases are implemented.
 
 Raw stream URLs, torrent URLs, passwords, and reusable tracker credentials do not belong in the database. Database version changes must use explicit migrations; destructive fallback is not an acceptable production default.
 
@@ -190,7 +196,9 @@ Current ordinary operations used by the synchronization layer:
 - movie status `finished` for watched;
 - restoration of the previous movie state for undo where the remote API permits it.
 
-Episode undo is deliberately conservative. WatchRelay must know whether the episode was watched or unwatched before its own mutation. If that prior state is unknown, the synchronization layer refuses to issue a destructive `UnCheckEpisode`. The MyShows `profile.Episodes` operation can provide watched episode IDs for a resolved show; wiring that evidence into content matching/provider preparation belongs to the matching phase.
+Current ordinary/public operations used by content resolution include show search, movie catalog search, external-ID lookup, show details with episodes, and authenticated profile episode-state lookup. Response parsing is isolated and covered by sanitized fixtures rather than live credentials.
+
+Episode undo is deliberately conservative. After an episode is resolved to a MyShows show/episode ID, WatchRelay reads the authenticated watched-episode list for that show. Presence means the previous state was `watched`; successful absence means it was `unwatched`. That state is placed on the sync target before WatchRelay's own mutation. If previous state cannot be established because authentication/provider access fails, a final sync target is not fabricated.
 
 Do not call the paid MyShows scrobbling endpoints as part of the normal WatchRelay product.
 
@@ -211,14 +219,14 @@ Rules:
 
 ## UI boundary
 
-The UI presents state; it does not own core watch decisions.
+The UI presents state; it does not own core watch decisions or matching heuristics.
 
 Primary mobile surfaces:
 
 - onboarding/permissions;
 - connection status;
 - recent history;
-- items needing attention;
+- items needing attention, including ambiguous matches;
 - settings;
 - mappings/undo where useful.
 
@@ -259,8 +267,9 @@ Current/expected categories, subject to implementation need:
 - Room 3;
 - AndroidX SQLite;
 - WorkManager;
-- an HTTP client/serialization stack;
 - Android media-session APIs.
+
+A small `org.json` JVM artifact is test-only so sanitized parser fixtures exercise real JSON behavior outside Android's mockable test jar; it is not shipped in the app.
 
 This is not a mandatory dependency list. Every library must earn its place when implementation begins.
 
@@ -269,7 +278,10 @@ This is not a mandatory dependency list. Every library must earn its place when 
 WatchRelay should fail conservatively:
 
 - insufficient metadata → unresolved, not guessed;
-- ambiguous match → ask, do not auto-sync;
+- unknown media type → unresolved, not assumed to be a movie;
+- ambiguous/low-confidence match → ask, do not auto-sync;
+- missing exact season/episode → unresolved, do not substitute another episode;
+- inability to read current remote state → do not fabricate a sync target for destructive undo semantics;
 - sync failure → keep local event pending when retryable;
 - expired auth → clear rejected credentials and surface reconnection without losing local history;
 - unknown prior episode state → do not issue destructive automatic undo;
