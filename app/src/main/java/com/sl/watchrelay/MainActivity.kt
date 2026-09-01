@@ -94,7 +94,9 @@ private fun TechnicalProofScreen() {
             }
         }
         Text(sessionStatus)
-        sessions.forEach(::MediaSessionCard)
+        for (session in sessions) {
+            MediaSessionCard(session)
+        }
 
         HorizontalDivider()
         Text("External-player intent probe", style = MaterialTheme.typography.titleLarge)
