@@ -159,9 +159,9 @@ Raw stream URLs, torrent URLs, passwords, and reusable tracker credentials do no
 
 Synchronization is durable and locally idempotent.
 
-A new watched event is written to local history and its remote operation is enqueued in one Room transaction. Failed retryable operations remain pending. Authentication failures move the operation into an explicit authentication-required state without deleting the local history. Undo is represented as a separate deterministic mutation.
+A new watched event is written to local history and its remote operation is enqueued in one Room transaction. After a remote attempt, the queue outcome and corresponding history state are also committed in one Room transaction so a process death cannot leave a terminal queue row paired with stale pending history. Failed retryable operations remain pending. Authentication failures move the operation into an explicit authentication-required state without deleting the local history. Undo is represented as a separate deterministic mutation.
 
-WorkManager performs deferred network synchronization with a connected-network constraint and exponential backoff. Unique work uses append-or-replace semantics so a new event scheduled while another queue drain is active is not stranded after that worker exits. App startup also schedules a drain, allowing durable pending work to recover after process restart.
+WorkManager performs deferred network synchronization with a connected-network constraint and exponential backoff. Unique work uses append-or-replace semantics so a new event scheduled while another queue drain is active is not stranded after that worker exits. App startup also schedules a drain, allowing durable pending work to recover after process restart. If a valid encrypted token survived a restart, the worker can restore auth-blocked operations to pending; a token rejected by MyShows with HTTP `401` or `403` is deleted immediately so stale credentials cannot create a retry loop.
 
 Delivery semantics are **at least once**, not exactly once. WatchRelay prevents duplicate local enqueue operations using deterministic operation IDs. However, if the process dies after the tracker accepts a request but before local success is committed, the same remote request may be sent again. MyShows does not expose a server-side idempotency key, so the provider operations used by WatchRelay must be state-setting operations whose repeated execution converges on the same remote state.
 
@@ -186,9 +186,11 @@ Product invariant: **MyShows Pro is not required.** WatchRelay performs progress
 Current ordinary operations used by the synchronization layer:
 
 - episode watched;
-- episode un-watched for undo where appropriate;
+- episode watched/unwatched restoration for undo when the prior remote episode state is known;
 - movie status `finished` for watched;
 - restoration of the previous movie state for undo where the remote API permits it.
+
+Episode undo is deliberately conservative. WatchRelay must know whether the episode was watched or unwatched before its own mutation. If that prior state is unknown, the synchronization layer refuses to issue a destructive `UnCheckEpisode`. The MyShows `profile.Episodes` operation can provide watched episode IDs for a resolved show; wiring that evidence into content matching/provider preparation belongs to the matching phase.
 
 Do not call the paid MyShows scrobbling endpoints as part of the normal WatchRelay product.
 
@@ -269,7 +271,8 @@ WatchRelay should fail conservatively:
 - insufficient metadata → unresolved, not guessed;
 - ambiguous match → ask, do not auto-sync;
 - sync failure → keep local event pending when retryable;
-- expired auth → surface reconnection without losing local history;
+- expired auth → clear rejected credentials and surface reconnection without losing local history;
+- unknown prior episode state → do not issue destructive automatic undo;
 - permanent provider error → preserve local history and expose failed state instead of spinning forever;
 - missing permission → explain the unavailable function;
 - unsupported player → report unsupported/experimental status, not silent false success.
