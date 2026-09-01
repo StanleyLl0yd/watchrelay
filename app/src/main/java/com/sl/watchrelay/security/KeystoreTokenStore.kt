@@ -28,10 +28,12 @@ class KeystoreTokenStore(
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
         cipher.updateAAD(AAD)
         val encrypted = cipher.doFinal(token.toByteArray(Charsets.UTF_8))
-        preferences.edit()
-            .putString(KEY_IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
-            .putString(KEY_CIPHERTEXT, Base64.encodeToString(encrypted, Base64.NO_WRAP))
-            .apply()
+        check(
+            preferences.edit()
+                .putString(KEY_IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+                .putString(KEY_CIPHERTEXT, Base64.encodeToString(encrypted, Base64.NO_WRAP))
+                .commit(),
+        ) { "Unable to persist encrypted tracker token" }
     }
 
     override fun read(): String? {
@@ -59,7 +61,7 @@ class KeystoreTokenStore(
     }
 
     override fun clear() {
-        preferences.edit().remove(KEY_IV).remove(KEY_CIPHERTEXT).apply()
+        preferences.edit().remove(KEY_IV).remove(KEY_CIPHERTEXT).commit()
     }
 
     private fun getOrCreateKey(): SecretKey {
