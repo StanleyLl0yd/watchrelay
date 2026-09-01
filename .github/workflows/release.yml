@@ -1,0 +1,170 @@
+name: Android Release Artifacts
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag, for example v1.0.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+
+jobs:
+  build-sign:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    environment: release
+
+    steps:
+      - name: Validate release tag
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools platforms;android-37.0 build-tools;36.0.0"
+          log-accepted-android-sdk-licenses: false
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "9.5.0"
+          cache-read-only: true
+
+      - name: Validate app version
+        run: |
+          set -euo pipefail
+          version_name="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)"
+          version_code="$(sed -n 's/^[[:space:]]*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -1)"
+          test -n "$version_name"
+          [[ "$version_code" =~ ^[0-9]+$ ]]
+          (( version_code > 0 ))
+          test "$RELEASE_TAG" = "v$version_name"
+
+      - name: Install pinned bundletool
+        env:
+          BUNDLETOOL_VERSION: "1.18.3"
+          BUNDLETOOL_SHA256: "a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29"
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error \
+            "https://github.com/google/bundletool/releases/download/${BUNDLETOOL_VERSION}/bundletool-all-${BUNDLETOOL_VERSION}.jar" \
+            --output "$RUNNER_TEMP/bundletool.jar"
+          printf '%s  %s\n' "$BUNDLETOOL_SHA256" "$RUNNER_TEMP/bundletool.jar" | sha256sum --check
+
+      - name: Restore and validate signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+          test -n "$ANDROID_CERT_SHA256"
+          umask 077
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/watchrelay-release.jks"
+          test -s "$RUNNER_TEMP/watchrelay-release.jks"
+          keytool -list \
+            -keystore "$RUNNER_TEMP/watchrelay-release.jks" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" >/dev/null
+
+      - name: Test, lint, and build signed release
+        env:
+          REQUIRE_RELEASE_SIGNING: "true"
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/watchrelay-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle test lint bundleRelease assembleRelease --stacktrace
+
+      - name: Verify release artifacts
+        env:
+          EXPECTED_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          aab="app/build/outputs/bundle/release/app-release.aab"
+          apk="app/build/outputs/apk/release/app-release.apk"
+          test -s "$aab"
+          test -s "$apk"
+
+          bash scripts/verify-play-artifacts.sh "$RUNNER_TEMP/bundletool.jar" "$aab" "$apk"
+
+          expected="$(printf '%s' "$EXPECTED_CERT_SHA256" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+
+          jarsigner -verify "$aab" | tee "$RUNNER_TEMP/aab-signature.txt"
+          grep -F 'jar verified.' "$RUNNER_TEMP/aab-signature.txt"
+          aab_fingerprint="$(keytool -printcert -jarfile "$aab" | awk -F': ' '/SHA256:/ {print $NF; exit}' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          test "$aab_fingerprint" = "$expected"
+
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner -print | sort -V | tail -1)"
+          test -n "$apksigner"
+          "$apksigner" verify --verbose --print-certs "$apk" | tee "$RUNNER_TEMP/apk-signature.txt"
+          apk_fingerprint="$(awk -F': ' '/certificate SHA-256 digest:/ {print $NF; exit}' "$RUNNER_TEMP/apk-signature.txt" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          test "$apk_fingerprint" = "$expected"
+
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          mkdir -p release
+          cp app/build/outputs/bundle/release/app-release.aab "release/WatchRelay-$version.aab"
+          cp app/build/outputs/apk/release/app-release.apk "release/WatchRelay-$version.apk"
+          (
+            cd release
+            sha256sum "WatchRelay-$version.aab" "WatchRelay-$version.apk" > "WatchRelay-$version.sha256"
+            sha256sum --check "WatchRelay-$version.sha256"
+          )
+
+      - name: Upload Google Play AAB
+        uses: actions/upload-artifact@v7
+        with:
+          name: watchrelay-${{ env.RELEASE_TAG }}-google-play-aab
+          path: |
+            release/WatchRelay-*.aab
+            release/WatchRelay-*.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload direct-install APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: watchrelay-${{ env.RELEASE_TAG }}-direct-install-apk
+          path: |
+            release/WatchRelay-*.apk
+            release/WatchRelay-*.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/watchrelay-release.jks"

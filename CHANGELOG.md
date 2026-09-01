@@ -20,6 +20,14 @@ The project is currently in pre-release development; versioned release sections 
 - Non-Pro MyShows diagnostic flow for authentication, movie watched/undo, and episode watched/undo validation.
 - GitHub Actions CI and Dependabot configuration for the Android project.
 - Real-device Phase 0 test plan.
+- Signed Android release workflow with AAB as the primary Google Play artifact and APK as a secondary direct-install artifact.
+- Automated AAB validation, native ABI inspection, 16 KB ELF/package-alignment checks, signing-certificate verification, and release gates for native compatibility regressions.
+- Android release requirements and signing/ABI policy documentation.
+
+### Changed
+
+- Android compatibility baseline is now explicitly `minSdk = 26`, `targetSdk = 36`, and `compileSdk = 37`.
+- CI now builds and validates signed release AAB/APK artifacts with a disposable CI key in addition to unit tests, lint, and the debug APK.
 
 ### Status
 
