@@ -4,15 +4,17 @@ on:
   push:
     tags:
       - "v*"
+    branches:
+      - "release/v*"
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing release tag, for example v1.0.0
+        description: Release tag, for example v1.0.0
         required: true
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: android-release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
@@ -28,15 +30,24 @@ jobs:
     environment: release
 
     steps:
+      - name: Normalize release tag
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF_NAME" in
+            release/v*) printf 'RELEASE_TAG=%s\n' "${GITHUB_REF_NAME#release/}" >> "$GITHUB_ENV" ;;
+            *) exit 1 ;;
+          esac
+
       - name: Validate release tag
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
 
-      - name: Checkout release tag
+      - name: Checkout release target
         uses: actions/checkout@v6
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ github.event_name == 'push' && github.ref_type == 'branch' && github.sha || github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -145,10 +156,24 @@ jobs:
             sha256sum --check "WatchRelay-$version.sha256"
           )
 
+      - name: Prepare release notes
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          notes="$RUNNER_TEMP/release-notes.md"
+          awk -v version="$version" '
+            index($0, "## " version " - ") == 1 { capture = 1; next }
+            capture && /^## / { exit }
+            capture { print }
+          ' CHANGELOG.md > "$notes"
+          if ! grep -q '[^[:space:]]' "$notes"; then
+            printf 'WatchRelay %s technical preview.\n' "$RELEASE_TAG" > "$notes"
+          fi
+
       - name: Upload Google Play AAB
         uses: actions/upload-artifact@v7
         with:
-          name: watchrelay-${{ env.RELEASE_TAG }}-google-play-aab
+          name: watchrelay-release-google-play-aab
           path: |
             release/WatchRelay-*.aab
             release/WatchRelay-*.sha256
@@ -158,12 +183,34 @@ jobs:
       - name: Upload direct-install APK
         uses: actions/upload-artifact@v7
         with:
-          name: watchrelay-${{ env.RELEASE_TAG }}-direct-install-apk
+          name: watchrelay-release-direct-install-apk
           path: |
             release/WatchRelay-*.apk
             release/WatchRelay-*.sha256
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          files=(
+            "release/WatchRelay-$version.aab"
+            "release/WatchRelay-$version.apk"
+            "release/WatchRelay-$version.sha256"
+          )
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" "${files[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "WatchRelay $RELEASE_TAG" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
+              --prerelease
+          fi
 
       - name: Remove signing material
         if: always()
