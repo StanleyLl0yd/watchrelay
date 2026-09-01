@@ -102,6 +102,34 @@ class SyncQueueProcessorTest {
     }
 
     @Test
+    fun authenticationFailureDuringUndoResumesAsUndoPending() = runBlocking {
+        val store = FakeStore()
+        val watch = episodeWatch()
+        store.recordWatch(watch)
+        SyncQueueProcessor(store, SyncExecutor { SyncExecutionResult.Success }).drain()
+        assertTrue(store.enqueueUndo(watch.eventId, 2_000))
+
+        val blocked = SyncQueueProcessor(
+            store,
+            SyncExecutor { SyncExecutionResult.AuthenticationRequired("expired") },
+            nowMs = { 3_000 },
+        )
+        assertEquals(QueueDrainResult.AUTH_REQUIRED, blocked.drain())
+        assertEquals(HistorySyncState.AUTH_REQUIRED, store.historyById(watch.eventId)!!.syncState)
+
+        assertEquals(1, store.resumeProvider(TrackerProvider.MYSHOWS))
+        assertEquals(HistorySyncState.UNDO_PENDING, store.historyById(watch.eventId)!!.syncState)
+
+        val resumed = SyncQueueProcessor(
+            store,
+            SyncExecutor { SyncExecutionResult.Success },
+            nowMs = { 4_000 },
+        )
+        assertEquals(QueueDrainResult.DRAINED, resumed.drain())
+        assertEquals(HistorySyncState.UNDONE, store.historyById(watch.eventId)!!.syncState)
+    }
+
+    @Test
     fun movieUndoWithoutPreviousStateFallsBackToRemove() = runBlocking {
         val store = FakeStore()
         val watch = movieWatch(previousState = null)
@@ -222,6 +250,14 @@ class SyncQueueProcessorTest {
         }
 
         override suspend fun resumeProvider(provider: TrackerProvider): Int {
+            val undoEventIds = pending
+                .filter {
+                    it.provider == provider &&
+                        it.purpose == SyncPurpose.UNDO &&
+                        states[it.operationId] == SyncQueueState.AUTH_REQUIRED
+                }
+                .mapTo(mutableSetOf()) { it.eventId }
+
             var resumed = 0
             for (mutation in pending) {
                 if (mutation.provider == provider && states[mutation.operationId] == SyncQueueState.AUTH_REQUIRED) {
@@ -229,9 +265,15 @@ class SyncQueueProcessorTest {
                     resumed++
                 }
             }
-            history.replaceAll { _, value ->
+            history.replaceAll { eventId, value ->
                 if (value.provider == provider && value.syncState == HistorySyncState.AUTH_REQUIRED) {
-                    value.copy(syncState = HistorySyncState.PENDING)
+                    value.copy(
+                        syncState = if (eventId in undoEventIds) {
+                            HistorySyncState.UNDO_PENDING
+                        } else {
+                            HistorySyncState.PENDING
+                        },
+                    )
                 } else value
             }
             return resumed
