@@ -71,6 +71,7 @@ class PlaybackEngine(
         }
 
         if (current.itemKey != observation.itemKey) {
+            current.clearTransientState()
             val completed = current.finish(PlaybackEndReason.ITEM_CHANGED)
             if (observation.status == PlaybackStatus.STOPPED) {
                 activeSession = null
@@ -96,7 +97,7 @@ class PlaybackEngine(
         private val intervals = ViewedIntervals()
         private var previous = initial
         private var durationMs = initial.durationMs
-        private var watchedEmitted = false
+        private var wasWatched = false
         private var becameWatched = false
 
         fun accept(observation: PlaybackObservation) {
@@ -121,7 +122,13 @@ class PlaybackEngine(
             }
 
             previous = observation
-            updateWatchedDecision()
+            val watched = isWatched()
+            becameWatched = watched && !wasWatched
+            wasWatched = watched
+        }
+
+        fun clearTransientState() {
+            becameWatched = false
         }
 
         fun snapshot(): PlaybackSessionSnapshot = snapshot(ended = false, endReason = null)
@@ -130,13 +137,6 @@ class PlaybackEngine(
             snapshot(ended = true, endReason = reason)
 
         private fun durationLimit(): Long = durationMs.takeIf { it > 0 } ?: Long.MAX_VALUE
-
-        private fun updateWatchedDecision() {
-            if (!watchedEmitted && isWatched()) {
-                watchedEmitted = true
-                becameWatched = true
-            }
-        }
 
         private fun isWatched(): Boolean =
             durationMs > 0 && intervals.totalMs.toDouble() / durationMs >= watchedThreshold
