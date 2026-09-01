@@ -70,7 +70,7 @@ class NotificationAccessService : NotificationListenerService() {
             seen += sessionKey
             val existing = sessions[sessionKey]
             val itemChanged = existing?.lastInput?.observation?.itemKey != rawInput.observation.itemKey
-            val bridgeMetadata = if (itemChanged) {
+            val bridgeMetadata = if (itemChanged && rawInput.observation.status == PlaybackStatus.PLAYING) {
                 bridgeMetadataStore.consume(controller.packageName, wallClockMs)
             } else {
                 null
