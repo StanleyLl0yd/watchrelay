@@ -164,6 +164,25 @@ abstract class WatchStoreDao {
 
     @Query("SELECT COUNT(*) FROM pending_sync WHERE state = 'PENDING'")
     abstract suspend fun pendingCount(): Int
+
+    @Query("SELECT COUNT(*) FROM watch_history WHERE syncState = 'AUTH_REQUIRED'")
+    abstract suspend fun authRequiredCount(): Int
+
+    @Query("SELECT COUNT(*) FROM watch_history WHERE syncState = 'FAILED'")
+    abstract suspend fun failedCount(): Int
+
+    @Query(
+        """
+        SELECT pending_sync.* FROM pending_sync
+        INNER JOIN watch_history ON watch_history.eventId = pending_sync.eventId
+        WHERE pending_sync.state IN ('AUTH_REQUIRED', 'FAILED')
+          AND watch_history.syncState = pending_sync.state
+        ORDER BY COALESCE(pending_sync.lastAttemptAtMs, pending_sync.createdAtMs) DESC,
+                 pending_sync.operationId
+        LIMIT :limit
+        """,
+    )
+    abstract suspend fun attentionItems(limit: Int): List<PendingSyncEntity>
 }
 
 @Database(

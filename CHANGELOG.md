@@ -16,11 +16,31 @@ All notable user-visible changes to WatchRelay will be documented in this file.
 - Fresh previous MyShows movie/episode state capture before synchronization so undo restores current pre-WatchRelay state rather than cached state.
 - Sanitized deterministic fixtures covering MyShows catalog/episode response parsing.
 - Unit coverage for normalizers, unambiguous and ambiguous matching, external IDs, title-only conservative behavior, episode resolution, mapping persistence/reuse, and mapping serialization.
+- Android MVP shell with Home, Setup, History, Settings, and Diagnostics surfaces.
+- First-run notification-listener permission guidance and live playback-observation access status.
+- Product MyShows Free connect/disconnect flow with Keystore-backed token persistence and no stored password.
+- Room-backed recent watch history with sync state, manual sync scheduling, and safe undo controls.
+- Persisted ambiguous/retry-required matching attention with candidate confirmation, retry, and ignore actions.
+- Configurable watched threshold from 50–100%, default 80%.
+- Redacted diagnostic export containing aggregate app/device state only; titles, history content, credentials, and playback URLs are excluded.
+- Background MediaSession tracking wired into viewed-interval accounting, conservative matching, local history, and durable synchronization.
+- External-player relay for `video/*` intents with installed-player selection, remembered target package, transient URI forwarding, allowlisted identification metadata, and later correlation with the selected player's MediaSession.
+- Settings control to clear the remembered external player.
+- JVM coverage for external-intent metadata sanitization and bridge metadata target/expiry policy.
+- Room 3 schema export directory tracked through the official Room Gradle plugin.
 
 ### Changed
 
 - Episode undo preparation now derives prior watched/unwatched state from the authenticated MyShows watched-episode list for the resolved show.
 - Content mappings remain outside the Room history/sync schema because they contain no secrets and do not justify a database migration at this stage.
+- The former diagnostic-only external-player intent handler now acts as a conservative relay while preserving the no-persisted-playback-URL rule.
+- Playback-source metadata from the relay is consumed only by the selected target player, preventing unrelated active MediaSessions from stealing the pending identification context.
+- Android development version is now `0.4.0-dev` with `versionCode 4`.
+
+### Status
+
+- Android MVP implementation is CI-complete, but the v0.4 release gate is not yet satisfied by code alone.
+- No LMD/VLC/MX Player/ViMu path is advertised as supported until real-device movie and episode end-to-end validation is recorded in `docs/COMPATIBILITY.md`.
 
 ## 0.2.0 - 2026-09-01
 
