@@ -68,6 +68,11 @@ class PlaybackEngine(
             return PlaybackEngineUpdate(active = session.snapshot())
         }
 
+        if (observation.observedAtMs < current.lastObservedAtMs) {
+            current.clearTransientState()
+            return PlaybackEngineUpdate(active = current.snapshot())
+        }
+
         if (current.itemKey != observation.itemKey) {
             current.clearTransientState()
             val completed = current.finish(PlaybackEndReason.ITEM_CHANGED)
@@ -92,6 +97,9 @@ class PlaybackEngine(
 
     private inner class Session(initial: PlaybackObservation) {
         val itemKey = initial.itemKey
+        val lastObservedAtMs: Long
+            get() = previous.observedAtMs
+
         private val intervals = ViewedIntervals()
         private var previous = initial
         private var durationMs = initial.durationMs
@@ -100,13 +108,15 @@ class PlaybackEngine(
 
         fun accept(observation: PlaybackObservation) {
             require(observation.itemKey == itemKey)
-            if (observation.observedAtMs < previous.observedAtMs) return
-
             durationMs = max(durationMs, observation.durationMs)
             becameWatched = false
 
             val elapsedMs = observation.observedAtMs - previous.observedAtMs
-            if (previous.status == PlaybackStatus.PLAYING && elapsedMs > 0) {
+            if (
+                previous.status == PlaybackStatus.PLAYING &&
+                previous.playbackSpeed > 0f &&
+                elapsedMs > 0
+            ) {
                 val start = previous.positionMs.coerceAtMost(durationLimit())
                 val end = observation.positionMs.coerceAtMost(durationLimit())
                 val positionDelta = end - start
