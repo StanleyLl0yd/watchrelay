@@ -3,6 +3,8 @@ package com.sl.watchrelay.sync
 import android.content.Context
 import com.sl.watchrelay.security.KeystoreTokenStore
 import com.sl.watchrelay.storage.WatchRelayDatabase
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class WatchSyncCoordinator(
     context: Context,
@@ -24,7 +26,9 @@ class WatchSyncCoordinator(
     }
 
     suspend fun saveMyShowsToken(token: String) {
-        tokenStore.save(token)
+        withContext(Dispatchers.IO) {
+            tokenStore.save(token)
+        }
         store.resumeProvider(TrackerProvider.MYSHOWS)
         SyncWorkScheduler.schedule(appContext)
     }
