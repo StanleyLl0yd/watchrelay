@@ -86,7 +86,7 @@ The Android baseline is `minSdk = 26`, `targetSdk = 36`, and `compileSdk = 37`, 
 
 The primary release artifact is a **signed Android App Bundle (`.aab`)** for Google Play. A signed APK may also be produced as a secondary artifact for direct installation or GitHub distribution.
 
-The current app has no native/JNI/NDK dependencies, so release artifacts contain no architecture-specific `.so` files and are ABI-neutral, including `arm64-v8a`. CI validates the AAB with pinned bundletool, requires 16 KB package alignment, and fails if an unexpected native library enters the dependency graph before its ABI and 16 KB compatibility have been reviewed.
+WatchRelay contains no project-owned NDK code, but the current AndroidX/Compose graph transitively packages `libandroidx.graphics.path.so` for `arm64-v8a`, `armeabi-v7a`, `x86_64`, and `x86`. AAB ABI splitting is explicitly enabled so a Play installation receives only its matching native ABI. CI requires `arm64-v8a`, validates all packaged 64-bit ELF `LOAD` segments for at least 16 KB alignment, validates the AAB as `PAGE_ALIGNMENT_16K`, and applies the 16 KB `zipalign` check to signed release APKs.
 
 Release signing uses CI secrets only; signing keys and passwords are never stored in Git. See [Android release requirements](docs/RELEASE.md).
 
