@@ -6,6 +6,7 @@ import com.sl.watchrelay.matching.CompletedWatchResolution
 import com.sl.watchrelay.matching.CompletedWatchResolver
 import com.sl.watchrelay.matching.ContentMatchCandidate
 import com.sl.watchrelay.matching.PendingMatch
+import com.sl.watchrelay.matching.PendingMatchState
 import com.sl.watchrelay.myshows.MyShowsFreeClient
 import com.sl.watchrelay.security.KeystoreTokenStore
 import com.sl.watchrelay.settings.AppSettings
@@ -50,6 +51,7 @@ data class MvpMatchAttentionItem(
     val eventId: String,
     val itemKey: String,
     val watchedAtMs: Long,
+    val state: PendingMatchState,
     val reason: String,
     val candidates: List<MvpMatchCandidate>,
 )
@@ -122,6 +124,10 @@ class MvpRepository(
             completedWatchResolver.resolve(decision)
         }
 
+    suspend fun retryMatch(eventId: String) = withContext(Dispatchers.IO) {
+        completedWatchResolver.retry(eventId)
+    }
+
     suspend fun confirmMatch(eventId: String, candidateIndex: Int) = withContext(Dispatchers.IO) {
         completedWatchResolver.confirm(eventId, candidateIndex)
     }
@@ -159,6 +165,7 @@ class MvpRepository(
         eventId = eventId,
         itemKey = itemKey,
         watchedAtMs = watchedAtMs,
+        state = state,
         reason = reason,
         candidates = candidates.map { it.toMvp() },
     )
