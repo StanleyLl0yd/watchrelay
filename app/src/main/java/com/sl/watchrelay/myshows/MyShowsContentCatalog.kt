@@ -14,10 +14,10 @@ class MyShowsContentCatalog(
         client.findByExternalId(source, id).getOrThrow()?.toDomain()
 
     override suspend fun searchShows(query: String): List<CatalogItem> =
-        client.searchShows(query).getOrThrow().map(MyShowsCatalogItem::toDomain)
+        client.searchShows(query).getOrThrow().map { it.toDomain() }
 
     override suspend fun searchMovies(query: String, year: Int?): List<CatalogItem> =
-        client.searchMovies(query, year).getOrThrow().map(MyShowsCatalogItem::toDomain)
+        client.searchMovies(query, year).getOrThrow().map { it.toDomain() }
 
     override suspend fun episodes(showId: Int): List<CatalogEpisode> =
         client.readShowEpisodes(showId).getOrThrow().map { episode ->
