@@ -20,6 +20,13 @@ The project is currently in pre-release development; versioned release sections 
 - Non-Pro MyShows diagnostic flow for authentication, movie watched/undo, and episode watched/undo validation.
 - Deterministic playback core with session lifecycle, viewed-interval accumulation, conservative seek handling, pause/resume, playback speed, duplicate/stale callback protection, autoplay transition handling, and configurable watched threshold.
 - Unit coverage for normal playback, pause/resume, forward/backward seek, duplicate/stale callbacks, abrupt stop, replay, autoplay transition, playback speed, and threshold configuration.
+- Room-backed local watch history and durable pending-sync queue.
+- Atomic watch-history plus sync-enqueue transactions and deterministic local operation IDs.
+- WorkManager-based network-constrained synchronization with exponential retry/backoff and startup recovery.
+- Explicit MyShows Free watch/undo operations for movies and episodes without Pro scrobble endpoints.
+- Authentication-required, retryable, permanent-failure, pending, synced, undo-pending, and undone synchronization states.
+- Android Keystore-backed AES-256-GCM protection for tracker tokens.
+- Unit coverage for duplicate enqueue protection, retry/restart behavior, authentication expiry/resume, movie/episode undo, permanent failures, and deterministic operation identity.
 - GitHub Actions CI and Dependabot configuration for the Android project.
 - Real-device Phase 0 test plan.
 - Signed Android release workflow with AAB as the primary Google Play artifact and APK as a secondary direct-install artifact.
@@ -30,8 +37,11 @@ The project is currently in pre-release development; versioned release sections 
 
 - Android compatibility baseline is now explicitly `minSdk = 26`, `targetSdk = 36`, and `compileSdk = 37`.
 - CI now builds and validates signed release AAB/APK artifacts with a disposable CI key in addition to unit tests, lint, and the debug APK.
+- Tracker synchronization is modeled as durable at-least-once state synchronization: local duplicate enqueues are prevented, while an identical state-setting request may be retried after a crash window because MyShows does not expose a server-side idempotency key.
+- WorkManager scheduling uses append-or-replace semantics so a watch event queued while another drain is active cannot be stranded after the active worker exits.
 
 ### Status
 
 - No production-ready Android application has been released yet.
 - Phase 0 technical validation is in progress; no player path is considered supported until real-device results are recorded.
+- Playback core implementation is complete; persistence/synchronization implementation is under release-gate verification.
