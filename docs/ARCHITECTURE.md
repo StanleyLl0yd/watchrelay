@@ -2,7 +2,7 @@
 
 ## Status
 
-WatchRelay is in technical-validation stage. This document describes the intended boundaries and constraints, not a claim that every component already exists.
+WatchRelay is in technical-validation stage. The playback-session core and first durable persistence/synchronization layer exist; playback-source adapters, production content matching, and product UI remain under development.
 
 ## Product boundary
 
@@ -144,39 +144,38 @@ Do not create broad heuristics that increase automatic coverage at the expense o
 
 ## Local persistence
 
-Once persistence is implemented, local storage should contain only what is necessary for:
+The current Android persistence layer uses Room 3 and stores only data needed for durable synchronization and local history. Current tables cover:
 
-- current/recent playback sessions where required for recovery;
 - local watch history;
-- content mappings;
-- pending/retry sync operations;
-- previous remote state needed for safe undo;
-- user settings;
-- non-secret diagnostic metadata.
+- pending/retry synchronization operations;
+- previous remote state needed for undo;
+- synchronization/error state and attempt metadata.
 
-The intended Android persistence technology is Room unless a simpler proven solution meets all persistence and migration requirements.
+Future schema additions may include current/recent playback recovery data, content mappings, and user settings when those phases are implemented.
 
-Raw stream URLs, torrent URLs, passwords, and reusable tracker credentials do not belong in the database.
+Raw stream URLs, torrent URLs, passwords, and reusable tracker credentials do not belong in the database. Database version changes must use explicit migrations; destructive fallback is not an acceptable production default.
 
 ## Sync queue
 
-Synchronization must be durable and idempotent.
+Synchronization is durable and locally idempotent.
 
-A watch event is recorded locally before or atomically with enqueueing the remote operation. Failed operations remain pending and are retried when appropriate.
+A new watched event is written to local history and its remote operation is enqueued in one Room transaction. Failed retryable operations remain pending. Authentication failures move the operation into an explicit authentication-required state without deleting the local history. Undo is represented as a separate deterministic mutation.
 
-WorkManager is the preferred mechanism for deferred network synchronization once the Android project exists.
+WorkManager performs deferred network synchronization with a connected-network constraint and exponential backoff. Unique work uses append-or-replace semantics so a new event scheduled while another queue drain is active is not stranded after that worker exits. App startup also schedules a drain, allowing durable pending work to recover after process restart.
 
-The queue must handle:
+Delivery semantics are **at least once**, not exactly once. WatchRelay prevents duplicate local enqueue operations using deterministic operation IDs. However, if the process dies after the tracker accepts a request but before local success is committed, the same remote request may be sent again. MyShows does not expose a server-side idempotency key, so the provider operations used by WatchRelay must be state-setting operations whose repeated execution converges on the same remote state.
+
+The queue handles:
 
 - no network;
 - tracker outage;
 - authentication expiry;
 - repeated retries;
-- duplicate enqueues;
+- duplicate local enqueues;
 - process death;
-- already-watched remote state.
+- already-watched remote state where provider data is available.
 
-A single completed playback must not create multiple equivalent remote mutations.
+A single completed playback must not create multiple local equivalent mutations. Equivalent remote retry requests after an unavoidable crash window must not create a different final tracker state.
 
 ## MyShows provider
 
@@ -184,7 +183,7 @@ MyShows is the initial tracker provider.
 
 Product invariant: **MyShows Pro is not required.** WatchRelay performs progress/scrobble logic locally and writes only the final ordinary watched state.
 
-Intended operations:
+Current ordinary operations used by the synchronization layer:
 
 - episode watched;
 - episode un-watched for undo where appropriate;
@@ -193,17 +192,17 @@ Intended operations:
 
 Do not call the paid MyShows scrobbling endpoints as part of the normal WatchRelay product.
 
-Authentication implementation must be selected only after the current supported MyShows flow is verified for a public third-party Android client. Credentials must never pass through a WatchRelay backend.
+The current diagnostic client can obtain a MyShows session token for technical validation, but production authentication must be selected only after the supported public third-party Android flow is verified. Credentials must never pass through a WatchRelay backend.
 
 ## Credential storage
 
-Long-lived tracker credentials must be protected with Android Keystore-backed encryption.
+Long-lived tracker credentials are protected with Android Keystore-backed AES-256-GCM encryption. Only ciphertext and IV are persisted outside the Keystore, and encrypted token persistence is committed synchronously before the authentication flow reports success.
 
 Rules:
 
 - never log tokens or passwords;
 - never include them in diagnostic export;
-- never place them in unencrypted preferences;
+- never place plaintext credentials in preferences or Room;
 - exclude secrets from backups;
 - if a password is temporarily required to obtain a token/session, discard it after the request;
 - communicate with tracker services over HTTPS with normal certificate validation.
@@ -251,11 +250,12 @@ Interfaces are justified at real integration boundaries, not merely because ther
 
 ## Dependencies
 
-Expected categories, subject to implementation need:
+Current/expected categories, subject to implementation need:
 
 - Kotlin / AndroidX;
 - Jetpack Compose and TV-appropriate Compose components;
-- Room;
+- Room 3;
+- AndroidX SQLite;
 - WorkManager;
 - an HTTP client/serialization stack;
 - Android media-session APIs.
@@ -268,8 +268,9 @@ WatchRelay should fail conservatively:
 
 - insufficient metadata → unresolved, not guessed;
 - ambiguous match → ask, do not auto-sync;
-- sync failure → keep local event pending;
+- sync failure → keep local event pending when retryable;
 - expired auth → surface reconnection without losing local history;
+- permanent provider error → preserve local history and expose failed state instead of spinning forever;
 - missing permission → explain the unavailable function;
 - unsupported player → report unsupported/experimental status, not silent false success.
 
@@ -277,4 +278,4 @@ WatchRelay should fail conservatively:
 
 The architecture may later support additional playback sources and tracker providers such as Trakt or Simkl, but no abstraction should be added solely for an unimplemented future integration.
 
-New providers must preserve the same core invariants: local watch decision, privacy, idempotent sync, and explicit compatibility claims.
+New providers must preserve the same core invariants: local watch decision, privacy, durable state synchronization, and explicit compatibility claims.
