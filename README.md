@@ -70,13 +70,14 @@ Actual support is recorded only after real-device validation. See [Compatibility
 
 ## Current technical proof
 
-The repository now contains a minimal Phase 0 Android diagnostic app. It intentionally does not implement automatic watched-state tracking yet. The current build provides:
+The repository contains a minimal Phase 0 Android diagnostic app plus the first pure Kotlin playback core. Automatic tracking is not wired into a production flow yet. The current build provides:
 
 - MediaSession inspection after the user grants Android notification-listener access;
 - sanitized inspection of `video/*` intents sent to WatchRelay as an external-player handler;
 - a MyShows Free diagnostic flow for authentication, movie watched/undo, and episode watched/undo without Pro scrobble endpoints;
+- deterministic playback-session accounting based on actual viewed intervals, with conservative seek detection, pause/resume, playback speed, duplicate/stale callback protection, stop/replay handling, autoplay item transitions, and an 80% default watched threshold;
 - Android phone/tablet and Android TV/Google TV launcher entry points;
-- CI verification for unit tests, lint, a debug build, the release AAB, and Google Play packaging constraints.
+- CI verification for unit tests, lint, a debug build, signed release AAB/APK builds, and Google Play packaging constraints.
 
 Follow [Phase 0 testing](docs/PHASE0-TESTING.md) for real-device validation. Until results are recorded there and in the compatibility matrix, no LMD/player path is advertised as supported.
 

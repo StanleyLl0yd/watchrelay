@@ -18,6 +18,8 @@ The project is currently in pre-release development; versioned release sections 
 - MediaSession inspection with notification-listener access.
 - Sanitized external-player intent probe for LazyMedia Deluxe investigation.
 - Non-Pro MyShows diagnostic flow for authentication, movie watched/undo, and episode watched/undo validation.
+- Deterministic playback core with session lifecycle, viewed-interval accumulation, conservative seek handling, pause/resume, playback speed, duplicate/stale callback protection, autoplay transition handling, and configurable watched threshold.
+- Unit coverage for normal playback, pause/resume, forward/backward seek, duplicate/stale callbacks, abrupt stop, replay, autoplay transition, playback speed, and threshold configuration.
 - GitHub Actions CI and Dependabot configuration for the Android project.
 - Real-device Phase 0 test plan.
 - Signed Android release workflow with AAB as the primary Google Play artifact and APK as a secondary direct-install artifact.
