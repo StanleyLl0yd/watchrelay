@@ -30,12 +30,13 @@ data class WatchHistoryEntity(
 
 @Entity(
     tableName = "pending_sync",
-    indices = [Index(value = ["eventId", "operationType"], unique = true)],
+    indices = [Index(value = ["eventId"])],
 )
 data class PendingSyncEntity(
     @PrimaryKey val operationId: String,
     val eventId: String,
     val provider: String,
+    val purpose: String,
     val operationType: String,
     val remoteId: Int,
     val value: String?,
@@ -62,6 +63,17 @@ abstract class WatchStoreDao {
     ): Boolean {
         if (insertHistory(history) == -1L) return false
         check(insertPending(pending) != -1L) { "Failed to enqueue sync operation for a new watch event" }
+        return true
+    }
+
+    @Transaction
+    open suspend fun enqueueUndo(
+        eventId: String,
+        pending: PendingSyncEntity,
+    ): Boolean {
+        if (historyById(eventId) == null) return false
+        if (insertPending(pending) == -1L) return false
+        updateHistoryState(eventId, "UNDO_PENDING")
         return true
     }
 
