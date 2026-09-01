@@ -8,7 +8,7 @@ import org.junit.Test
 
 class PendingMatchCodecTest {
     @Test
-    fun pendingCompletedWatchRoundTripsWithoutPlaybackUrls() {
+    fun ambiguousCompletedWatchRoundTripsWithoutPlaybackUrls() {
         val source = PendingMatch(
             eventId = "event-1",
             itemKey = "player:item-42",
@@ -24,6 +24,7 @@ class PendingMatchCodecTest {
                 imdbId = "tt0386676",
                 mediaKind = SourceMediaKind.EPISODE,
             ),
+            state = PendingMatchState.AMBIGUOUS,
             candidates = listOf(
                 ContentMatchCandidate(
                     mapping = SavedContentMapping(
@@ -50,6 +51,27 @@ class PendingMatchCodecTest {
         assertEquals(source, decoded)
         assertEquals(false, encoded.contains("http://"))
         assertEquals(false, encoded.contains("https://"))
+    }
+
+    @Test
+    fun retryRequiredWatchCanPersistWithoutCandidates() {
+        val source = PendingMatch(
+            eventId = "event-offline",
+            itemKey = "player:item-offline",
+            viewedMs = 8_000,
+            durationMs = 10_000,
+            watchedAtMs = 200,
+            metadata = PlaybackMetadata(
+                title = "Dune",
+                year = 2021,
+                mediaKind = SourceMediaKind.MOVIE,
+            ),
+            state = PendingMatchState.RETRY_REQUIRED,
+            candidates = emptyList(),
+            reason = "Retry when online",
+        )
+
+        assertEquals(source, PendingMatchCodec.decode(PendingMatchCodec.encode(source)))
     }
 
     @Test
