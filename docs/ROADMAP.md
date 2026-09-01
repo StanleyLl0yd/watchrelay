@@ -52,7 +52,7 @@ Goal: build the minimal reliable watch-decision engine.
 
 Implementation status: **complete and merged to `main`**. Real playback-source validation remains part of the broader v0 technical proof.
 
-Planned work:
+Implemented work:
 
 - playback event model;
 - playback session lifecycle;
@@ -95,7 +95,7 @@ A completed watch survives process death/offline state, remains durably queued, 
 
 Goal: identify content conservatively and make errors repairable.
 
-Implementation status: **implemented and covered by deterministic release-gate tests; product-facing ambiguous-match UI remains part of v0.4**.
+Implementation status: **complete and merged to `main`**. Product-facing handling of ambiguous results is implemented in v0.4.
 
 Implemented work:
 
@@ -111,8 +111,6 @@ Implemented work:
 - fresh previous MyShows state capture for safe undo;
 - sanitized MyShows response fixtures and deterministic matcher tests.
 
-Ambiguous-match selection UI is intentionally deferred to the Android MVP phase; the matching core already returns the candidates and persists an explicit user choice.
-
 ### Release gate
 
 Known unambiguous fixtures auto-match; deliberately ambiguous and title-only low-confidence fixtures do not auto-sync; user corrections persist and are reused; MyShows response parsing is covered by sanitized fixtures.
@@ -121,24 +119,33 @@ Known unambiguous fixtures auto-match; deliberately ambiguous and title-only low
 
 Goal: make the proven core usable on phones and tablets.
 
-Planned surfaces:
+Implementation status: **product implementation complete on the `feat/android-mvp` branch and CI-validated; the release gate remains open until real-device playback paths are validated and recorded.**
 
-- onboarding;
-- required permission setup;
-- MyShows connection;
-- tracking status;
-- recent history;
-- pending/failed sync state;
-- items needing attention;
-- ambiguous-match selection/correction;
-- watched-threshold setting;
-- undo;
-- privacy/security information;
-- safe diagnostic export.
+Implemented surfaces and wiring:
+
+- first-run setup and required notification-listener permission guidance;
+- MyShows Free connection/disconnection with Keystore-backed token persistence and no password persistence;
+- Home status for authentication, playback-observation access, sync queue, failures, and unresolved matches;
+- recent Room-backed watch history;
+- durable pending/auth-required/failed sync attention state and manual sync scheduling;
+- persisted ambiguous/retry-required match attention with explicit candidate confirmation, retry, and ignore actions;
+- watched-threshold setting from 50–100%, default 80%;
+- safe watched-state undo through the durable sync queue;
+- local-first privacy/security information;
+- redacted diagnostic export that excludes titles, history content, credentials, and playback URLs;
+- background `MediaSession` observation wired into the viewed-interval pipeline and matching/synchronization flow;
+- external-player relay mode for `video/*` intents: WatchRelay can select and remember an installed player, forward the transient media intent, retain only allowlisted identification metadata, and correlate it with the selected player's subsequent `MediaSession`;
+- Settings control to clear the remembered external player;
+- Room schema export through the Room 3 Gradle plugin for future migration discipline;
+- development version advanced to `0.4.0-dev` / `versionCode 4`.
+
+The external-player relay is an implementation path, not a compatibility claim. VLC, MX Player, ViMu, LazyMedia Deluxe built-in playback, and other paths remain experimental until real-device results are entered in `docs/COMPATIBILITY.md`.
 
 ### Release gate
 
 A new user can install, connect, grant required permissions, watch supported content, see the result, recover from a sync failure, resolve an ambiguous match, and undo an incorrect mark without developer tools.
+
+**Remaining gate work:** execute and record real-device end-to-end validation for at least one movie and one episode through a supported LMD/player path. Code/CI completion alone does not satisfy this gate.
 
 ## v0.5 — Android TV / Google TV
 
