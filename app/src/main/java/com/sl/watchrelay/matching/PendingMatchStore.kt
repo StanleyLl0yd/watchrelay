@@ -6,6 +6,11 @@ import com.sl.watchrelay.sync.TrackerProvider
 import org.json.JSONArray
 import org.json.JSONObject
 
+enum class PendingMatchState {
+    AMBIGUOUS,
+    RETRY_REQUIRED,
+}
+
 data class PendingMatch(
     val eventId: String,
     val itemKey: String,
@@ -13,6 +18,7 @@ data class PendingMatch(
     val durationMs: Long,
     val watchedAtMs: Long,
     val metadata: PlaybackMetadata,
+    val state: PendingMatchState,
     val candidates: List<ContentMatchCandidate>,
     val reason: String,
 ) {
@@ -23,7 +29,7 @@ data class PendingMatch(
         require(durationMs > 0)
         require(viewedMs <= durationMs)
         require(watchedAtMs >= 0)
-        require(candidates.isNotEmpty())
+        if (state == PendingMatchState.AMBIGUOUS) require(candidates.isNotEmpty())
     }
 }
 
@@ -81,6 +87,7 @@ object PendingMatchCodec {
         .put("durationMs", match.durationMs)
         .put("watchedAtMs", match.watchedAtMs)
         .put("metadata", encodeMetadata(match.metadata))
+        .put("state", match.state.name)
         .put("reason", match.reason)
         .put(
             "candidates",
@@ -100,6 +107,10 @@ object PendingMatchCodec {
             durationMs = root.getLong("durationMs"),
             watchedAtMs = root.getLong("watchedAtMs"),
             metadata = decodeMetadata(root.getJSONObject("metadata")),
+            state = root.optString("state")
+                .takeIf(String::isNotBlank)
+                ?.let(PendingMatchState::valueOf)
+                ?: PendingMatchState.AMBIGUOUS,
             candidates = buildList {
                 for (index in 0 until candidates.length()) {
                     add(decodeCandidate(candidates.getJSONObject(index)))
