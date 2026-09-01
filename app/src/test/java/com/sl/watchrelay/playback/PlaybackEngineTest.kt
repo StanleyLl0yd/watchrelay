@@ -17,9 +17,9 @@ class PlaybackEngineTest {
         val watched = engine.accept(observation(position = 80_000, time = 80_000)).active!!
         val duplicate = engine.accept(observation(position = 90_000, time = 90_000)).active!!
 
-        assertEquals(40_000, halfway.viewedMs)
+        assertEquals(40_000L, halfway.viewedMs)
         assertFalse(halfway.watched)
-        assertEquals(80_000, watched.viewedMs)
+        assertEquals(80_000L, watched.viewedMs)
         assertTrue(watched.watched)
         assertTrue(watched.becameWatched)
         assertTrue(duplicate.watched)
@@ -37,7 +37,7 @@ class PlaybackEngineTest {
             observation(position = 40_000, time = 70_000, status = PlaybackStatus.PAUSED),
         ).active!!
 
-        assertEquals(40_000, snapshot.viewedMs)
+        assertEquals(40_000L, snapshot.viewedMs)
         assertFalse(snapshot.watched)
     }
 
@@ -50,7 +50,7 @@ class PlaybackEngineTest {
         engine.accept(observation(position = 80_000, time = 11_000))
         val snapshot = engine.accept(observation(position = 90_000, time = 21_000)).active!!
 
-        assertEquals(20_000, snapshot.viewedMs)
+        assertEquals(20_000L, snapshot.viewedMs)
         assertFalse(snapshot.watched)
     }
 
@@ -63,7 +63,7 @@ class PlaybackEngineTest {
         engine.accept(observation(position = 20_000, time = 51_000))
         val snapshot = engine.accept(observation(position = 50_000, time = 81_000)).active!!
 
-        assertEquals(50_000, snapshot.viewedMs)
+        assertEquals(50_000L, snapshot.viewedMs)
         assertFalse(snapshot.watched)
     }
 
@@ -76,7 +76,19 @@ class PlaybackEngineTest {
         engine.accept(observation(position = 10_000, time = 10_000))
         val snapshot = engine.accept(observation(position = 20_000, time = 20_000)).active!!
 
-        assertEquals(20_000, snapshot.viewedMs)
+        assertEquals(20_000L, snapshot.viewedMs)
+    }
+
+    @Test
+    fun outOfOrderCallbackDoesNotCorruptProgress() {
+        val engine = PlaybackEngine()
+
+        engine.accept(observation(position = 0, time = 0))
+        engine.accept(observation(position = 20_000, time = 20_000))
+        engine.accept(observation(position = 10_000, time = 10_000))
+        val snapshot = engine.accept(observation(position = 30_000, time = 30_000)).active!!
+
+        assertEquals(30_000L, snapshot.viewedMs)
     }
 
     @Test
@@ -91,7 +103,7 @@ class PlaybackEngineTest {
 
         assertNull(update.active)
         assertNotNull(update.completed)
-        assertEquals(75_000, update.completed!!.viewedMs)
+        assertEquals(75_000L, update.completed!!.viewedMs)
         assertFalse(update.completed!!.watched)
         assertEquals(PlaybackEndReason.STOPPED, update.completed!!.endReason)
     }
@@ -109,9 +121,9 @@ class PlaybackEngineTest {
 
         assertTrue(first.watched)
         assertTrue(first.ended)
-        assertEquals(0, replay.viewedMs)
+        assertEquals(0L, replay.viewedMs)
         assertFalse(replay.watched)
-        assertEquals(10_000, replayProgress.viewedMs)
+        assertEquals(10_000L, replayProgress.viewedMs)
     }
 
     @Test
@@ -134,7 +146,7 @@ class PlaybackEngineTest {
         assertFalse(transition.completed!!.becameWatched)
         assertNotNull(transition.active)
         assertEquals("episode-b", transition.active!!.itemKey)
-        assertEquals(0, transition.active!!.viewedMs)
+        assertEquals(0L, transition.active!!.viewedMs)
     }
 
     @Test
@@ -144,7 +156,18 @@ class PlaybackEngineTest {
         engine.accept(observation(position = 0, time = 0, speed = 2f))
         val snapshot = engine.accept(observation(position = 20_000, time = 10_000, speed = 2f)).active!!
 
-        assertEquals(20_000, snapshot.viewedMs)
+        assertEquals(20_000L, snapshot.viewedMs)
+    }
+
+    @Test
+    fun watchedThresholdIsConfigurable() {
+        val engine = PlaybackEngine(watchedThreshold = 0.5)
+
+        engine.accept(observation(position = 0, time = 0))
+        val snapshot = engine.accept(observation(position = 50_000, time = 50_000)).active!!
+
+        assertTrue(snapshot.watched)
+        assertTrue(snapshot.becameWatched)
     }
 
     private fun observation(
