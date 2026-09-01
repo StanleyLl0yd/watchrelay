@@ -6,6 +6,8 @@ import android.media.session.MediaSessionManager
 import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import com.sl.watchrelay.matching.CompletedWatchResolver
+import com.sl.watchrelay.matching.PlaybackMetadata
+import com.sl.watchrelay.matching.SourceMediaKind
 import com.sl.watchrelay.settings.AppSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +23,7 @@ class NotificationAccessService : NotificationListenerService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val adapter = MediaSessionPlaybackAdapter()
     private val sessions = mutableMapOf<String, ActiveSession>()
+    private val bridgeMetadataStore by lazy { BridgeMetadataStore(applicationContext) }
     private var pollingJob: Job? = null
 
     override fun onListenerConnected() {
@@ -62,10 +65,20 @@ class NotificationAccessService : NotificationListenerService() {
         var anyPlaying = false
 
         for (controller in controllers) {
-            val input = adapter.toInput(controller, elapsedRealtimeMs, wallClockMs) ?: continue
+            val rawInput = adapter.toInput(controller, elapsedRealtimeMs, wallClockMs) ?: continue
             val sessionKey = sessionKey(controller)
             seen += sessionKey
-            val active = sessions.getOrPut(sessionKey) { newSession() }
+            val existing = sessions[sessionKey]
+            val itemChanged = existing?.lastInput?.observation?.itemKey != rawInput.observation.itemKey
+            val bridgeMetadata = if (itemChanged) {
+                bridgeMetadataStore.consume(controller.packageName, wallClockMs)
+            } else {
+                null
+            }
+            val input = if (bridgeMetadata == null) rawInput else rawInput.copy(
+                metadata = mergeMetadata(rawInput.metadata, bridgeMetadata),
+            )
+            val active = existing ?: newSession().also { sessions[sessionKey] = it }
             active.lastInput = input
             runCatching { active.pipeline.accept(input) }
             if (input.observation.status == PlaybackStatus.PLAYING) anyPlaying = true
@@ -92,6 +105,18 @@ class NotificationAccessService : NotificationListenerService() {
 
     private fun sessionKey(controller: MediaController): String =
         "${controller.packageName}:${controller.sessionToken.hashCode()}"
+
+    private fun mergeMetadata(session: PlaybackMetadata, bridge: PlaybackMetadata) = PlaybackMetadata(
+        title = bridge.title ?: session.title,
+        subtitle = bridge.subtitle ?: session.subtitle,
+        originalTitle = bridge.originalTitle ?: session.originalTitle,
+        year = bridge.year ?: session.year,
+        season = bridge.season ?: session.season,
+        episode = bridge.episode ?: session.episode,
+        imdbId = bridge.imdbId ?: session.imdbId,
+        kinopoiskId = bridge.kinopoiskId ?: session.kinopoiskId,
+        mediaKind = if (bridge.mediaKind != SourceMediaKind.UNKNOWN) bridge.mediaKind else session.mediaKind,
+    )
 
     private class ActiveSession(
         val pipeline: PlaybackTrackingPipeline,
