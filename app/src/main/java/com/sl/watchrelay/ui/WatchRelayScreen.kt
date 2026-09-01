@@ -181,7 +181,9 @@ fun WatchRelayScreen(
             AppSection.SETTINGS -> SettingsSection(
                 initialThreshold = snapshot?.watchedThresholdPercent
                     ?: AppSettings.DEFAULT_THRESHOLD_PERCENT,
+                externalPlayerPackage = snapshot?.externalPlayerPackage,
                 onSave = { value -> runAction { repository.setWatchedThresholdPercent(value) } },
+                onForgetExternalPlayer = { runAction { repository.forgetExternalPlayer() } },
             )
 
             AppSection.DIAGNOSTICS -> DiagnosticsSection(
@@ -357,7 +359,8 @@ private fun SetupSection(
     localStatus?.let { Text(it) }
 
     HorizontalDivider()
-    Text("Automatic LMD/player support is still experimental until each path is validated on real devices. A missed mark is preferred to a wrong mark.")
+    Text("3. For external-player playback, choose WatchRelay in the source app. On the first request WatchRelay asks which installed video player should receive the transient playback intent.")
+    Text("Automatic LMD/player support remains experimental until each path is validated on real devices. A missed mark is preferred to a wrong mark.")
 }
 
 @Composable
@@ -393,7 +396,9 @@ private fun HistorySummary(
 @Composable
 private fun SettingsSection(
     initialThreshold: Int,
+    externalPlayerPackage: String?,
     onSave: (Int) -> Unit,
+    onForgetExternalPlayer: () -> Unit,
 ) {
     var threshold by remember(initialThreshold) { mutableStateOf(initialThreshold.toFloat()) }
     val rounded = threshold.roundToInt().coerceIn(
@@ -413,6 +418,16 @@ private fun SettingsSection(
     Text("The threshold applies to newly created playback sessions. Default: ${AppSettings.DEFAULT_THRESHOLD_PERCENT}%.")
 
     HorizontalDivider()
+    Text("External player", style = MaterialTheme.typography.titleLarge)
+    if (externalPlayerPackage == null) {
+        Text("Not selected. WatchRelay will ask on the next external video playback request.")
+    } else {
+        Text("Remembered package: $externalPlayerPackage")
+        OutlinedButton(onClick = onForgetExternalPlayer) { Text("Forget external player") }
+    }
+    Text("Only the player package and safe content metadata are retained. Playback URLs are not stored.")
+
+    HorizontalDivider()
     Text("Privacy", style = MaterialTheme.typography.titleLarge)
     Text("Playback analysis and history are local-first. WatchRelay has no account, backend, advertising, or telemetry requirement. Tracker credentials are not written to Room or logs.")
 }
@@ -428,7 +443,7 @@ private fun DiagnosticsSection(
     var status by remember { mutableStateOf("Not scanned yet") }
 
     Text("Diagnostics", style = MaterialTheme.typography.titleLarge)
-    Text("MediaSession probe remains available for Phase 0 compatibility validation.")
+    Text("MediaSession probe remains available for compatibility validation.")
     Button(onClick = {
         sessionProbe.readActiveSessions().fold(
             onSuccess = {
@@ -485,8 +500,8 @@ private fun DiagnosticsSection(
     }
 
     HorizontalDivider()
-    Text("External-player intent probe")
-    Text("The existing sanitized video intent handler remains registered for LMD/external-player investigation. It never persists the playback URI.")
+    Text("External-player bridge")
+    Text("The video handler forwards the original transient playback intent to the remembered player while persisting only allowlisted metadata for MediaSession correlation. The playback URI is never stored.")
 }
 
 private fun candidateLabel(candidate: MvpMatchCandidate): String = buildString {
