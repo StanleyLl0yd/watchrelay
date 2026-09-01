@@ -21,18 +21,19 @@ verify_64_bit_elf_alignment() {
     local entry="$2"
     local temp_file
     temp_file="$(mktemp)"
-    trap 'rm -f "$temp_file"' RETURN
     unzip -p "$archive" "$entry" > "$temp_file"
 
     local elf_class
     elf_class="$(readelf -h "$temp_file" | awk -F: '/Class:/ {gsub(/[[:space:]]/, "", $2); print $2; exit}')"
     if [[ "$elf_class" != "ELF64" ]]; then
+        rm -f "$temp_file"
         echo "Expected a 64-bit ELF for $entry, found ${elf_class:-unknown}." >&2
         exit 1
     fi
 
     local load_alignments
     load_alignments="$(readelf -lW "$temp_file" | awk '$1 == "LOAD" {print $NF}')"
+    rm -f "$temp_file"
     if [[ -z "$load_alignments" ]]; then
         echo "No ELF LOAD segments found in $entry." >&2
         exit 1
