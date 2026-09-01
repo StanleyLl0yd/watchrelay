@@ -19,7 +19,7 @@ The current build contract is:
 
 The primary Google Play artifact is a **signed Android App Bundle (`.aab`)**.
 
-A signed universal APK may also be produced as a secondary artifact for direct installation, testing, and GitHub distribution. The APK is not the primary Google Play deliverable.
+A signed APK may also be produced as a secondary artifact for direct installation, testing, and GitHub distribution. The APK is not the primary Google Play deliverable.
 
 Release signing is configured only through environment variables and CI secrets. Signing material must never be committed to the repository.
 
@@ -35,31 +35,35 @@ The release workflow restores the keystore only in the runner's temporary direct
 
 ## ABI policy
 
-The current WatchRelay dependency graph contains no native/JNI/NDK libraries. Therefore release artifacts contain no architecture-specific `.so` files and are ABI-neutral: they run on supported Android ABIs, including `arm64-v8a`, without shipping redundant native binaries.
+WatchRelay itself does not contain C/C++ or NDK source, but the current AndroidX/Compose dependency graph transitively packages `libandroidx.graphics.path.so`. The release bundle currently contains this library for:
 
-Do not add `abiFilters` while the app remains native-code-free; doing so would add an unnecessary device restriction without reducing native payload.
+- `arm64-v8a`;
+- `armeabi-v7a`;
+- `x86_64`;
+- `x86`.
 
-If any direct or transitive dependency starts packaging native code, release CI must fail until the native dependency set is explicitly reviewed. Before allowing such a dependency, verify at minimum:
+`arm64-v8a` is mandatory and is verified by CI whenever native code is present.
 
-1. `arm64-v8a` is present and fully supported;
-2. every additional packaged ABI is required by an actual supported device class;
-3. obsolete or unnecessary ABIs are removed;
-4. every 64-bit `.so` is compatible with 16 KB memory page sizes;
-5. the final AAB/APK packaging remains 16 KB aligned;
-6. the native SDK/library vendor documents 16 KB compatibility or the binaries are independently verified.
+WatchRelay keeps Android App Bundle ABI splitting explicitly enabled. Google Play therefore delivers only the native ABI required by the target device rather than installing all packaged architectures on every device. No manual `abiFilters` are applied while the dependency itself supports these Android ABIs: filtering them would reduce device/emulator compatibility without reducing the native payload delivered to an individual Play installation.
+
+If the native dependency set changes, CI enumerates the packaged `.so` files and rejects unknown ABI directories. A new native dependency must be reviewed before release for provenance, supported ABIs, and 16 KB compatibility.
 
 ## 16 KB page-size compatibility
 
-Google Play requires apps targeting Android 15/API 35 or newer to support 16 KB memory page sizes on 64-bit devices. WatchRelay enforces this in CI.
+Google Play requires apps targeting Android 15/API 35 or newer to support 16 KB memory page sizes on 64-bit devices. WatchRelay enforces this in CI at the final-artifact level rather than assuming dependency compatibility from version numbers alone.
 
-For the current native-code-free application:
+The checks are:
 
-- there are no ELF shared libraries whose segment alignment can be incompatible;
-- the generated AAB must report `PAGE_ALIGNMENT_16K` through bundletool;
-- unexpected `.so` files in either the AAB or release APK are treated as a release-blocking change;
-- the APK is checked with `zipalign -P 16` when a signed release APK is built.
+1. validate the AAB with pinned bundletool;
+2. require bundletool configuration to report `PAGE_ALIGNMENT_16K`;
+3. enumerate every packaged native `.so`;
+4. require `arm64-v8a` whenever native code is present;
+5. inspect every packaged `arm64-v8a` and `x86_64` ELF with `readelf` and require every `LOAD` segment to have alignment of at least `0x4000` (16 KB);
+6. for a release APK, repeat the native ELF checks and run `zipalign -c -P 16 -v 4`.
 
 The verification is implemented by `scripts/verify-play-artifacts.sh` and is run for the release bundle in normal CI and for both signed release artifacts in the release workflow.
+
+This policy means a future transitive dependency update cannot silently introduce a 64-bit native binary that is incompatible with 16 KB page-size devices.
 
 ## Release workflow
 
@@ -71,7 +75,7 @@ A release build must:
 2. pass unit tests and Android lint;
 3. build a signed AAB and signed APK;
 4. validate the AAB with pinned bundletool;
-5. verify 16 KB packaging and the native-library policy;
+5. verify native ABIs, 16 KB ELF alignment, and package alignment;
 6. verify both artifact signatures against `ANDROID_CERT_SHA256`;
 7. create SHA-256 checksums;
 8. upload the AAB as the Google Play artifact and the APK as the secondary direct-install artifact.
