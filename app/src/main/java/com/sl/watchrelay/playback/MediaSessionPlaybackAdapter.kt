@@ -15,6 +15,7 @@ class MediaSessionPlaybackAdapter {
     ): PlaybackTrackingInput? {
         val metadata = controller.metadata ?: return null
         val state = controller.playbackState ?: return null
+        if (state.position < 0) return null
         val durationMs = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION).takeIf { it > 0 } ?: return null
         val title = metadata.text(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
             ?: metadata.text(MediaMetadata.METADATA_KEY_TITLE)
@@ -26,7 +27,7 @@ class MediaSessionPlaybackAdapter {
         val status = state.toPlaybackStatus()
         val speed = state.playbackSpeed.coerceAtLeast(0f)
         val positionMs = MediaSessionPosition.project(
-            basePositionMs = state.position.coerceAtLeast(0),
+            basePositionMs = state.position,
             lastUpdateElapsedMs = state.lastPositionUpdateTime,
             nowElapsedMs = elapsedRealtimeMs,
             playbackSpeed = speed,
@@ -91,7 +92,12 @@ object MediaSessionPosition {
         playing: Boolean,
     ): Long {
         val safeBase = basePositionMs.coerceAtLeast(0)
-        if (!playing || playbackSpeed <= 0f || nowElapsedMs <= lastUpdateElapsedMs) {
+        if (
+            !playing ||
+            playbackSpeed <= 0f ||
+            lastUpdateElapsedMs <= 0 ||
+            nowElapsedMs <= lastUpdateElapsedMs
+        ) {
             return safeBase.coerceAtMost(durationMs)
         }
         val elapsed = nowElapsedMs - lastUpdateElapsedMs
