@@ -21,9 +21,13 @@ class SyncWorker(
 ) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
         val store = RoomSyncQueueStore(WatchRelayDatabase.get(applicationContext).watchStoreDao())
+        val tokenStore = KeystoreTokenStore(applicationContext)
+        if (tokenStore.read() != null) {
+            store.resumeProvider(TrackerProvider.MYSHOWS)
+        }
         val executor = MyShowsSyncExecutor(
             MyShowsFreeClient(),
-            KeystoreTokenStore(applicationContext),
+            tokenStore,
         )
         return when (SyncQueueProcessor(store, executor).drain()) {
             QueueDrainResult.IDLE,
