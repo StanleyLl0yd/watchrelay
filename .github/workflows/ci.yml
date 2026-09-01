@@ -35,7 +35,36 @@ jobs:
             "https://github.com/google/bundletool/releases/download/${BUNDLETOOL_VERSION}/bundletool-all-${BUNDLETOOL_VERSION}.jar" \
             --output "$RUNNER_TEMP/bundletool.jar"
           printf '%s  %s\n' "$BUNDLETOOL_SHA256" "$RUNNER_TEMP/bundletool.jar" | sha256sum --check
-      - name: Verify source and build
-        run: gradle test lint assembleDebug bundleRelease --stacktrace
-      - name: Verify Google Play bundle
-        run: bash scripts/verify-play-artifacts.sh "$RUNNER_TEMP/bundletool.jar" app/build/outputs/bundle/release/app-release.aab
+      - name: Create disposable CI signing key
+        run: |
+          set -euo pipefail
+          keytool -genkeypair \
+            -keystore "$RUNNER_TEMP/watchrelay-ci.jks" \
+            -storepass watchrelay-ci \
+            -keypass watchrelay-ci \
+            -alias ci \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 1 \
+            -dname "CN=WatchRelay CI,O=WatchRelay,C=US"
+      - name: Verify source and build signed artifacts
+        env:
+          REQUIRE_RELEASE_SIGNING: "true"
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/watchrelay-ci.jks
+          ANDROID_KEYSTORE_PASSWORD: watchrelay-ci
+          ANDROID_KEY_ALIAS: ci
+          ANDROID_KEY_PASSWORD: watchrelay-ci
+        run: gradle test lint assembleDebug assembleRelease bundleRelease --stacktrace
+      - name: Verify Google Play and direct-install artifacts
+        run: |
+          set -euo pipefail
+          aab="app/build/outputs/bundle/release/app-release.aab"
+          apk="app/build/outputs/apk/release/app-release.apk"
+          bash scripts/verify-play-artifacts.sh "$RUNNER_TEMP/bundletool.jar" "$aab" "$apk"
+          jarsigner -verify "$aab" | grep -F 'jar verified.'
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner -print | sort -V | tail -1)"
+          test -n "$apksigner"
+          "$apksigner" verify --verbose "$apk"
+      - name: Remove disposable signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/watchrelay-ci.jks"
