@@ -26,6 +26,19 @@ class ContentMatcherTest {
     }
 
     @Test
+    fun titleOnlyMovieDoesNotAutoConfirm() = runBlocking {
+        val catalog = FakeCatalog().apply {
+            movies += CatalogItem(10, "Dune", "Dune", 2021)
+        }
+        val result = ContentMatcher(catalog, MemoryMappingStore()).resolve(
+            PlaybackMetadata(title = "Dune", mediaKind = SourceMediaKind.MOVIE),
+        )
+
+        assertTrue(result is ContentMatchResult.Ambiguous)
+        assertEquals(80, (result as ContentMatchResult.Ambiguous).candidates.single().confidence)
+    }
+
+    @Test
     fun equalMovieCandidatesRemainAmbiguous() = runBlocking {
         val catalog = FakeCatalog().apply {
             movies += CatalogItem(10, "The Office", "The Office", 2005)
