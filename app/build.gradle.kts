@@ -51,6 +51,12 @@ android {
         }
     }
 
+    bundle {
+        abi {
+            enableSplit = true
+        }
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
