@@ -8,6 +8,7 @@ import com.sl.watchrelay.matching.ContentMatchCandidate
 import com.sl.watchrelay.matching.PendingMatch
 import com.sl.watchrelay.matching.PendingMatchState
 import com.sl.watchrelay.myshows.MyShowsFreeClient
+import com.sl.watchrelay.playback.ExternalPlayerPreferences
 import com.sl.watchrelay.security.KeystoreTokenStore
 import com.sl.watchrelay.settings.AppSettings
 import com.sl.watchrelay.storage.PendingSyncEntity
@@ -63,6 +64,7 @@ data class MvpSnapshot(
     val failedCount: Int,
     val watchedThresholdPercent: Int,
     val onboardingCompleted: Boolean,
+    val externalPlayerPackage: String?,
     val history: List<MvpHistoryItem>,
     val attention: List<MvpAttentionItem>,
     val matchAttention: List<MvpMatchAttentionItem>,
@@ -75,6 +77,7 @@ class MvpRepository(
     private val dao = WatchRelayDatabase.get(appContext).watchStoreDao()
     private val tokenStore = KeystoreTokenStore(appContext)
     private val settings = AppSettings(appContext)
+    private val playerPreferences = ExternalPlayerPreferences(appContext)
     private val syncCoordinator = WatchSyncCoordinator(appContext)
     private val completedWatchResolver = CompletedWatchResolver(appContext)
     private val myShows = MyShowsFreeClient()
@@ -87,6 +90,7 @@ class MvpRepository(
             failedCount = dao.failedCount(),
             watchedThresholdPercent = settings.watchedThresholdPercent,
             onboardingCompleted = settings.onboardingCompleted,
+            externalPlayerPackage = playerPreferences.targetPackage,
             history = dao.recentHistory(HISTORY_LIMIT).map { it.toMvp() },
             attention = dao.attentionItems(ATTENTION_LIMIT).map { it.toMvp() },
             matchAttention = completedWatchResolver.pending().map { it.toMvp() },
@@ -113,6 +117,10 @@ class MvpRepository(
 
     suspend fun setWatchedThresholdPercent(value: Int) = withContext(Dispatchers.IO) {
         settings.watchedThresholdPercent = value
+    }
+
+    suspend fun forgetExternalPlayer() = withContext(Dispatchers.IO) {
+        playerPreferences.targetPackage = null
     }
 
     suspend fun completeOnboarding() = withContext(Dispatchers.IO) {
