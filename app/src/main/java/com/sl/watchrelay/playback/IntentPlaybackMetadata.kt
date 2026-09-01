@@ -83,6 +83,26 @@ data class BridgeMetadata(
     val metadata: PlaybackMetadata,
 )
 
+internal enum class BridgeMetadataLookup {
+    CONSUME,
+    KEEP,
+    DROP,
+}
+
+internal object BridgeMetadataPolicy {
+    fun lookup(
+        storedTargetPackage: String,
+        createdAtMs: Long,
+        requestedPackage: String,
+        nowMs: Long,
+        maxAgeMs: Long,
+    ): BridgeMetadataLookup = when {
+        nowMs < createdAtMs || nowMs - createdAtMs > maxAgeMs -> BridgeMetadataLookup.DROP
+        storedTargetPackage != requestedPackage -> BridgeMetadataLookup.KEEP
+        else -> BridgeMetadataLookup.CONSUME
+    }
+}
+
 class BridgeMetadataStore(
     context: Context,
 ) {
@@ -116,16 +136,34 @@ class BridgeMetadataStore(
     fun consume(targetPackage: String, nowMs: Long): PlaybackMetadata? {
         val raw = preferences.getString(KEY_VALUE, null) ?: return null
         val value = runCatching { decode(raw) }.getOrNull()
-        if (
-            value == null ||
-            value.targetPackage != targetPackage ||
-            nowMs - value.createdAtMs !in 0..MAX_AGE_MS
-        ) {
-            preferences.edit().remove(KEY_VALUE).commit()
+        if (value == null) {
+            clear()
             return null
         }
+
+        return when (
+            BridgeMetadataPolicy.lookup(
+                storedTargetPackage = value.targetPackage,
+                createdAtMs = value.createdAtMs,
+                requestedPackage = targetPackage,
+                nowMs = nowMs,
+                maxAgeMs = MAX_AGE_MS,
+            )
+        ) {
+            BridgeMetadataLookup.CONSUME -> {
+                clear()
+                value.metadata
+            }
+            BridgeMetadataLookup.KEEP -> null
+            BridgeMetadataLookup.DROP -> {
+                clear()
+                null
+            }
+        }
+    }
+
+    private fun clear() {
         preferences.edit().remove(KEY_VALUE).commit()
-        return value.metadata
     }
 
     private fun decode(raw: String): BridgeMetadata {
