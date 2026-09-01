@@ -102,6 +102,31 @@ class SyncQueueProcessorTest {
     }
 
     @Test
+    fun episodeUndoRestoresAlreadyWatchedRemoteState() = runBlocking {
+        val store = FakeStore()
+        val watch = episodeWatch(previousState = SyncMutation.EPISODE_WATCHED_STATE)
+        store.recordWatch(watch)
+        SyncQueueProcessor(store, SyncExecutor { SyncExecutionResult.Success }).drain()
+
+        assertTrue(store.enqueueUndo(watch.eventId, 2_000))
+        val undo = store.nextPending()!!
+        assertEquals(SyncPurpose.UNDO, undo.purpose)
+        assertEquals(SyncOperationType.CHECK_EPISODE, undo.type)
+    }
+
+    @Test
+    fun episodeUndoIsRejectedWhenPreviousRemoteStateIsUnknown() = runBlocking {
+        val store = FakeStore()
+        val watch = episodeWatch(previousState = null)
+        store.recordWatch(watch)
+        SyncQueueProcessor(store, SyncExecutor { SyncExecutionResult.Success }).drain()
+
+        assertFalse(store.enqueueUndo(watch.eventId, 2_000))
+        assertEquals(HistorySyncState.SYNCED, store.historyById(watch.eventId)!!.syncState)
+        assertEquals(0, store.pendingCount())
+    }
+
+    @Test
     fun authenticationFailureDuringUndoResumesAsUndoPending() = runBlocking {
         val store = FakeStore()
         val watch = episodeWatch()
@@ -168,6 +193,7 @@ class SyncQueueProcessorTest {
         eventId: String = "event-episode",
         remoteId: Int = 42,
         watchedAtMs: Long = 1_000,
+        previousState: String? = SyncMutation.EPISODE_UNWATCHED_STATE,
     ) = CompletedWatch(
         eventId = eventId,
         itemKey = "episode-key",
@@ -178,6 +204,7 @@ class SyncQueueProcessorTest {
             provider = TrackerProvider.MYSHOWS,
             mediaType = RemoteMediaType.EPISODE,
             remoteId = remoteId,
+            previousRemoteState = previousState,
         ),
     )
 
@@ -221,6 +248,15 @@ class SyncQueueProcessorTest {
         override suspend fun enqueueUndo(eventId: String, createdAtMs: Long): Boolean {
             val current = history[eventId] ?: return false
             if (current.syncState == HistorySyncState.UNDONE || current.syncState == HistorySyncState.UNDO_PENDING) {
+                return false
+            }
+            if (
+                current.remoteType == RemoteMediaType.EPISODE &&
+                current.previousRemoteState !in setOf(
+                    SyncMutation.EPISODE_WATCHED_STATE,
+                    SyncMutation.EPISODE_UNWATCHED_STATE,
+                )
+            ) {
                 return false
             }
             val mutation = SyncMutation.forUndo(current, createdAtMs)
