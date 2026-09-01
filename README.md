@@ -76,11 +76,19 @@ The repository now contains a minimal Phase 0 Android diagnostic app. It intenti
 - sanitized inspection of `video/*` intents sent to WatchRelay as an external-player handler;
 - a MyShows Free diagnostic flow for authentication, movie watched/undo, and episode watched/undo without Pro scrobble endpoints;
 - Android phone/tablet and Android TV/Google TV launcher entry points;
-- CI verification for unit tests, lint, and a debug build.
+- CI verification for unit tests, lint, a debug build, the release AAB, and Google Play packaging constraints.
 
 Follow [Phase 0 testing](docs/PHASE0-TESTING.md) for real-device validation. Until results are recorded there and in the compatibility matrix, no LMD/player path is advertised as supported.
 
-The current build configuration uses JDK 17, Android API 37, Kotlin 2.4.10, Android Gradle Plugin 9.3.1, Gradle 9.5.0 in CI, and the stable Compose August 2026 BOM. A checked-in Gradle wrapper will be added once generated from the pinned Gradle version; CI currently installs that exact Gradle version explicitly.
+The Android baseline is `minSdk = 26`, `targetSdk = 36`, and `compileSdk = 37`, using JDK 17, Kotlin 2.4.10, Android Gradle Plugin 9.3.1, Gradle 9.5.0 in CI, and the stable Compose August 2026 BOM. Android 16/API 36 is kept as the target behavior until Android 17 target-specific behavior has been explicitly validated; compiling against API 37 does not by itself raise the runtime requirement.
+
+## Release and Google Play
+
+The primary release artifact is a **signed Android App Bundle (`.aab`)** for Google Play. A signed APK may also be produced as a secondary artifact for direct installation or GitHub distribution.
+
+The current app has no native/JNI/NDK dependencies, so release artifacts contain no architecture-specific `.so` files and are ABI-neutral, including `arm64-v8a`. CI validates the AAB with pinned bundletool, requires 16 KB package alignment, and fails if an unexpected native library enters the dependency graph before its ABI and 16 KB compatibility have been reviewed.
+
+Release signing uses CI secrets only; signing keys and passwords are never stored in Git. See [Android release requirements](docs/RELEASE.md).
 
 ## Product principles
 
@@ -138,6 +146,7 @@ See [Roadmap](docs/ROADMAP.md) for release gates and detailed phases.
 - [Roadmap](docs/ROADMAP.md)
 - [Phase 0 testing](docs/PHASE0-TESTING.md)
 - [Compatibility](docs/COMPATIBILITY.md)
+- [Android release requirements](docs/RELEASE.md)
 - [Privacy](PRIVACY.md)
 - [Security](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
