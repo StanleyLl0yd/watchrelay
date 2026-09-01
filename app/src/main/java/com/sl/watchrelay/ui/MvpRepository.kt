@@ -1,6 +1,11 @@
 package com.sl.watchrelay.ui
 
 import android.content.Context
+import com.sl.watchrelay.matching.CompletedPlaybackDecision
+import com.sl.watchrelay.matching.CompletedWatchResolution
+import com.sl.watchrelay.matching.CompletedWatchResolver
+import com.sl.watchrelay.matching.ContentMatchCandidate
+import com.sl.watchrelay.matching.PendingMatch
 import com.sl.watchrelay.myshows.MyShowsFreeClient
 import com.sl.watchrelay.security.KeystoreTokenStore
 import com.sl.watchrelay.settings.AppSettings
@@ -32,6 +37,23 @@ data class MvpAttentionItem(
     val message: String?,
 )
 
+data class MvpMatchCandidate(
+    val title: String?,
+    val originalTitle: String?,
+    val year: Int?,
+    val season: Int?,
+    val episode: Int?,
+    val confidence: Int,
+)
+
+data class MvpMatchAttentionItem(
+    val eventId: String,
+    val itemKey: String,
+    val watchedAtMs: Long,
+    val reason: String,
+    val candidates: List<MvpMatchCandidate>,
+)
+
 data class MvpSnapshot(
     val authenticated: Boolean,
     val pendingCount: Int,
@@ -41,6 +63,7 @@ data class MvpSnapshot(
     val onboardingCompleted: Boolean,
     val history: List<MvpHistoryItem>,
     val attention: List<MvpAttentionItem>,
+    val matchAttention: List<MvpMatchAttentionItem>,
 )
 
 class MvpRepository(
@@ -51,6 +74,7 @@ class MvpRepository(
     private val tokenStore = KeystoreTokenStore(appContext)
     private val settings = AppSettings(appContext)
     private val syncCoordinator = WatchSyncCoordinator(appContext)
+    private val completedWatchResolver = CompletedWatchResolver(appContext)
     private val myShows = MyShowsFreeClient()
 
     suspend fun snapshot(): MvpSnapshot = withContext(Dispatchers.IO) {
@@ -63,6 +87,7 @@ class MvpRepository(
             onboardingCompleted = settings.onboardingCompleted,
             history = dao.recentHistory(HISTORY_LIMIT).map(WatchHistoryEntity::toMvp),
             attention = dao.attentionItems(ATTENTION_LIMIT).map(PendingSyncEntity::toMvp),
+            matchAttention = completedWatchResolver.pending().map(PendingMatch::toMvp),
         )
     }
 
@@ -92,6 +117,19 @@ class MvpRepository(
         settings.onboardingCompleted = true
     }
 
+    suspend fun resolveCompletedWatch(decision: CompletedPlaybackDecision): CompletedWatchResolution =
+        withContext(Dispatchers.IO) {
+            completedWatchResolver.resolve(decision)
+        }
+
+    suspend fun confirmMatch(eventId: String, candidateIndex: Int) = withContext(Dispatchers.IO) {
+        completedWatchResolver.confirm(eventId, candidateIndex)
+    }
+
+    suspend fun dismissMatch(eventId: String) = withContext(Dispatchers.IO) {
+        completedWatchResolver.dismiss(eventId)
+    }
+
     private fun WatchHistoryEntity.toMvp(): MvpHistoryItem {
         val state = HistorySyncState.valueOf(syncState)
         return MvpHistoryItem(
@@ -115,6 +153,23 @@ class MvpRepository(
         state = state,
         attempts = attemptCount,
         message = lastError,
+    )
+
+    private fun PendingMatch.toMvp() = MvpMatchAttentionItem(
+        eventId = eventId,
+        itemKey = itemKey,
+        watchedAtMs = watchedAtMs,
+        reason = reason,
+        candidates = candidates.map(ContentMatchCandidate::toMvp),
+    )
+
+    private fun ContentMatchCandidate.toMvp() = MvpMatchCandidate(
+        title = title,
+        originalTitle = originalTitle,
+        year = year,
+        season = season,
+        episode = episode,
+        confidence = confidence,
     )
 
     private companion object {
