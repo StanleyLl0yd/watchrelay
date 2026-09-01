@@ -46,6 +46,8 @@ write the ordinary watched state to MyShows
 
 For episodes, the integration target is the ordinary watched/unwatched operation. For movies, the target is the ordinary movie status with `finished` representing “watched”. Authentication and API use must remain compatible with the current MyShows service and its terms before a public release.
 
+Synchronization is designed as durable **at-least-once state synchronization**. WatchRelay prevents duplicate local queue entries for the same operation. If the app dies after MyShows accepts a state mutation but before local success is committed, the same state-setting request can be retried; MyShows does not expose a server-side idempotency key, so exact-once network delivery cannot be guaranteed honestly. Equivalent retries must converge on the same remote state.
+
 ## Playback detection
 
 The preferred integration order is:
@@ -70,12 +72,16 @@ Actual support is recorded only after real-device validation. See [Compatibility
 
 ## Current technical proof
 
-The repository contains a minimal Phase 0 Android diagnostic app plus the first pure Kotlin playback core. Automatic tracking is not wired into a production flow yet. The current build provides:
+The repository contains a minimal Phase 0 Android diagnostic app, the playback core, and the first durable synchronization layer. Automatic tracking is not wired into a production flow yet. The current build provides:
 
 - MediaSession inspection after the user grants Android notification-listener access;
 - sanitized inspection of `video/*` intents sent to WatchRelay as an external-player handler;
 - a MyShows Free diagnostic flow for authentication, movie watched/undo, and episode watched/undo without Pro scrobble endpoints;
 - deterministic playback-session accounting based on actual viewed intervals, with conservative seek detection, pause/resume, playback speed, duplicate/stale callback protection, stop/replay handling, autoplay item transitions, and an 80% default watched threshold;
+- Room-backed local watch history and durable pending-sync queue with atomic history/enqueue writes;
+- deterministic local sync-operation IDs, retryable/auth-required/permanent-failure states, and explicit movie/episode undo operations;
+- WorkManager network-constrained synchronization with exponential backoff and startup recovery after process restart;
+- Android Keystore-backed AES-256-GCM tracker-token storage;
 - Android phone/tablet and Android TV/Google TV launcher entry points;
 - CI verification for unit tests, lint, a debug build, signed release AAB/APK builds, and Google Play packaging constraints.
 

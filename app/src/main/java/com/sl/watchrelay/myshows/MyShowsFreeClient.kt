@@ -1,6 +1,7 @@
 package com.sl.watchrelay.myshows
 
 import org.json.JSONObject
+import java.io.IOException
 import java.net.URL
 import javax.net.ssl.HttpsURLConnection
 
@@ -8,6 +9,14 @@ data class MovieState(
     val title: String?,
     val watchStatus: String?,
 )
+
+class MyShowsHttpException(
+    val statusCode: Int,
+) : IOException("MyShows returned HTTP $statusCode")
+
+class MyShowsApiException(
+    message: String,
+) : IOException(message)
 
 class MyShowsFreeClient {
     fun authenticate(login: String, password: String): Result<String> = runCatching {
@@ -19,9 +28,11 @@ class MyShowsFreeClient {
                 .put("login", login)
                 .put("password", password),
         )
-        response.optJSONObject("error")?.let { error(it.optString("message", "Authentication failed")) }
+        response.optJSONObject("error")?.let {
+            throw MyShowsApiException(it.optString("message", "Authentication failed"))
+        }
         response.optString("token").takeIf(String::isNotBlank)
-            ?: error("MyShows did not return a session token")
+            ?: throw MyShowsApiException("MyShows did not return a session token")
     }
 
     fun readMovieState(token: String, movieId: Int): Result<MovieState> = runCatching {
@@ -69,7 +80,7 @@ class MyShowsFreeClient {
 
     private fun rpcObject(token: String, method: String, params: JSONObject): JSONObject {
         val result = rpc(token, method, params)
-        return result as? JSONObject ?: error("Unexpected MyShows response for $method")
+        return result as? JSONObject ?: throw MyShowsApiException("Unexpected MyShows response for $method")
     }
 
     private fun rpc(token: String, method: String, params: JSONObject): Any? {
@@ -83,8 +94,12 @@ class MyShowsFreeClient {
                 .put("id", 1),
             mapOf(AUTH_HEADER to "Bearer $token"),
         )
-        response.optJSONObject("error")?.let { error(it.optString("message", "MyShows request failed")) }
-        check(response.has("result")) { "MyShows response has no result" }
+        response.optJSONObject("error")?.let {
+            throw MyShowsApiException(it.optString("message", "MyShows request failed"))
+        }
+        if (!response.has("result")) {
+            throw MyShowsApiException("MyShows response has no result")
+        }
         return response.opt("result")
     }
 
@@ -107,8 +122,8 @@ class MyShowsFreeClient {
             val status = connection.responseCode
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-            check(status in 200..299) { "MyShows returned HTTP $status" }
-            check(text.isNotBlank()) { "MyShows returned an empty response" }
+            if (status !in 200..299) throw MyShowsHttpException(status)
+            if (text.isBlank()) throw MyShowsApiException("MyShows returned an empty response")
             JSONObject(text)
         } finally {
             connection.disconnect()

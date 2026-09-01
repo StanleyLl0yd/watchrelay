@@ -50,6 +50,8 @@ The tested device/player paths and limitations must be recorded in `docs/COMPATI
 
 Goal: build the minimal reliable watch-decision engine.
 
+Implementation status: **complete and merged to `main`**. Real playback-source validation remains part of the broader v0 technical proof.
+
 Planned work:
 
 - playback event model;
@@ -70,6 +72,8 @@ Core tests cover normal play, pause/resume, forward/backward seek, duplicate cal
 
 Goal: never lose a valid watch event because the app or network disappears.
 
+Implementation status: **implemented in the persistence/sync branch and under final release-gate verification**.
+
 Planned work:
 
 - local history;
@@ -81,9 +85,11 @@ Planned work:
 - undo model;
 - secret storage backed by Android Keystore.
 
+Synchronization semantics are durable **at-least-once state synchronization**. WatchRelay prevents duplicate local enqueue operations. If the process dies after MyShows accepts a mutation but before local success is committed, the same state-setting request can be retried because MyShows does not expose a server-side idempotency key. Equivalent retries must therefore be safe and converge on the same remote state.
+
 ### Release gate
 
-A completed watch survives process death/offline state and syncs once connectivity returns without duplicate remote mutations.
+A completed watch survives process death/offline state, remains durably queued, and converges to the intended remote state once connectivity returns. Duplicate local enqueue operations are rejected and equivalent retry requests do not create a different remote state.
 
 ## v0.3 — Content matching
 
