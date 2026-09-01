@@ -3,10 +3,12 @@ package com.sl.watchrelay.matching
 import android.content.Context
 import com.sl.watchrelay.sync.CompletedWatch
 import com.sl.watchrelay.sync.WatchSyncCoordinator
+import java.io.IOException
 
 sealed interface CompletedWatchResolution {
     data class Synced(val result: ContentMatchResult.Confirmed) : CompletedWatchResolution
     data class NeedsConfirmation(val pending: PendingMatch) : CompletedWatchResolution
+    data class RetryRequired(val pending: PendingMatch) : CompletedWatchResolution
     data class Unresolved(val reason: String) : CompletedWatchResolution
 }
 
@@ -26,7 +28,18 @@ class CompletedWatchResolver(
     private val syncCoordinator: WatchSyncCoordinator = WatchSyncCoordinator(context),
 ) {
     suspend fun resolve(decision: CompletedPlaybackDecision): CompletedWatchResolution {
-        return when (val result = contentResolver.resolve(decision.metadata)) {
+        val result = try {
+            contentResolver.resolve(decision.metadata)
+        } catch (_: IOException) {
+            val pending = decision.toPending(
+                state = PendingMatchState.RETRY_REQUIRED,
+                reason = "Content matching could not be completed. Retry when the tracker is reachable.",
+            )
+            pendingStore.put(pending)
+            return CompletedWatchResolution.RetryRequired(pending)
+        }
+
+        return when (result) {
             is ContentMatchResult.Confirmed -> {
                 enqueue(decision, result)
                 pendingStore.remove(decision.eventId)
@@ -34,13 +47,8 @@ class CompletedWatchResolver(
             }
 
             is ContentMatchResult.Ambiguous -> {
-                val pending = PendingMatch(
-                    eventId = decision.eventId,
-                    itemKey = decision.itemKey,
-                    viewedMs = decision.viewedMs,
-                    durationMs = decision.durationMs,
-                    watchedAtMs = decision.watchedAtMs,
-                    metadata = decision.metadata,
+                val pending = decision.toPending(
+                    state = PendingMatchState.AMBIGUOUS,
                     candidates = result.candidates,
                     reason = result.reason,
                 )
@@ -48,28 +56,27 @@ class CompletedWatchResolver(
                 CompletedWatchResolution.NeedsConfirmation(pending)
             }
 
-            is ContentMatchResult.Unresolved -> CompletedWatchResolution.Unresolved(result.reason)
+            is ContentMatchResult.Unresolved -> {
+                pendingStore.remove(decision.eventId)
+                CompletedWatchResolution.Unresolved(result.reason)
+            }
         }
     }
 
     suspend fun pending(): List<PendingMatch> = pendingStore.list()
 
+    suspend fun retry(eventId: String): CompletedWatchResolution {
+        val pending = pendingStore.get(eventId) ?: error("Pending content match was not found")
+        return resolve(pending.toDecision())
+    }
+
     suspend fun confirm(eventId: String, candidateIndex: Int): ContentMatchResult.Confirmed {
         val pending = pendingStore.get(eventId) ?: error("Pending content match was not found")
+        check(pending.state == PendingMatchState.AMBIGUOUS) { "This content match requires a retry, not confirmation" }
         val candidate = pending.candidates.getOrNull(candidateIndex)
             ?: error("Content match candidate is no longer available")
         val confirmed = contentResolver.confirm(pending.metadata, candidate)
-        enqueue(
-            CompletedPlaybackDecision(
-                eventId = pending.eventId,
-                itemKey = pending.itemKey,
-                viewedMs = pending.viewedMs,
-                durationMs = pending.durationMs,
-                watchedAtMs = pending.watchedAtMs,
-                metadata = pending.metadata,
-            ),
-            confirmed,
-        )
+        enqueue(pending.toDecision(), confirmed)
         pendingStore.remove(eventId)
         return confirmed
     }
@@ -93,4 +100,29 @@ class CompletedWatchResolver(
             ),
         )
     }
+
+    private fun CompletedPlaybackDecision.toPending(
+        state: PendingMatchState,
+        candidates: List<ContentMatchCandidate> = emptyList(),
+        reason: String,
+    ) = PendingMatch(
+        eventId = eventId,
+        itemKey = itemKey,
+        viewedMs = viewedMs,
+        durationMs = durationMs,
+        watchedAtMs = watchedAtMs,
+        metadata = metadata,
+        state = state,
+        candidates = candidates,
+        reason = reason,
+    )
+
+    private fun PendingMatch.toDecision() = CompletedPlaybackDecision(
+        eventId = eventId,
+        itemKey = itemKey,
+        viewedMs = viewedMs,
+        durationMs = durationMs,
+        watchedAtMs = watchedAtMs,
+        metadata = metadata,
+    )
 }
