@@ -125,7 +125,7 @@ The current baseline is:
 - JDK 17;
 - Kotlin 2.4.10;
 - Android Gradle Plugin 9.3.1;
-- Gradle 9.5.0 wrapper;
+- Gradle 9.5.0 in CI;
 - Compose BOM 2026.08.00;
 - Room 3.0.2.
 
