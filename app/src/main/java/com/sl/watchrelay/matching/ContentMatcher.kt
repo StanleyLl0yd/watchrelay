@@ -1,7 +1,6 @@
 package com.sl.watchrelay.matching
 
 import com.sl.watchrelay.sync.RemoteMediaType
-import com.sl.watchrelay.sync.SyncMutation
 import com.sl.watchrelay.sync.TrackerProvider
 import com.sl.watchrelay.sync.TrackerTarget
 
@@ -11,7 +10,12 @@ class ContentMatcher(
 ) {
     suspend fun resolve(source: PlaybackMetadata): ContentMatchResult {
         val metadata = MetadataNormalizer.normalize(source)
-        if (metadata.mappingSignature.isBlank()) {
+        if (
+            metadata.titleKey == null &&
+            metadata.originalTitleKey == null &&
+            metadata.imdbId == null &&
+            metadata.kinopoiskId == null
+        ) {
             return ContentMatchResult.Unresolved("Playback metadata is empty")
         }
 
@@ -77,7 +81,7 @@ class ContentMatcher(
         }
 
         val shows = searchQueries(metadata)
-            .flatMap(catalog::searchShows)
+            .flatMap { query -> catalog.searchShows(query) }
             .distinctBy(CatalogItem::id)
             .map { item -> item to score(metadata, item) }
             .filter { (_, score) -> score > 0 }
@@ -283,7 +287,7 @@ class ContentMatcher(
     private fun searchQueries(metadata: NormalizedMetadata): List<String> = listOfNotNull(
         metadata.originalTitle,
         metadata.title,
-    ).map(String::trim).filter(String::isNotBlank).distinct()
+    ).map { it.trim() }.filter { it.isNotBlank() }.distinct()
 
     private fun score(metadata: NormalizedMetadata, candidate: CatalogItem): Int {
         val sourceKeys = listOfNotNull(metadata.originalTitleKey, metadata.titleKey).distinct()
@@ -310,8 +314,8 @@ class ContentMatcher(
 
     private fun similarTitle(left: String, right: String): Boolean {
         if (left.length < 5 || right.length < 5) return false
-        val leftTokens = left.split(' ').filter(String::isNotBlank).toSet()
-        val rightTokens = right.split(' ').filter(String::isNotBlank).toSet()
+        val leftTokens = left.split(' ').filter { it.isNotBlank() }.toSet()
+        val rightTokens = right.split(' ').filter { it.isNotBlank() }.toSet()
         if (leftTokens.isEmpty() || rightTokens.isEmpty()) return false
         val intersection = leftTokens.intersect(rightTokens).size.toDouble()
         val union = leftTokens.union(rightTokens).size.toDouble()
