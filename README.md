@@ -2,9 +2,9 @@
 
 **Automatic watch tracking and sync companion for Android, Android TV and Google TV.**
 
-> **Project status:** early development / technical validation. The repository does not contain a production-ready app yet.
+> **Project status:** Android MVP development / real-device validation. The repository does not contain a production-ready app yet, and no player path is advertised as supported until it is validated on real devices.
 
-WatchRelay is a free, local-first companion app that observes supported media playback, determines what was actually watched, and synchronizes the final watched state to a connected tracking service.
+WatchRelay is a free, local-first companion app that observes supported media playback, determines what was actually watched, identifies the movie or episode conservatively, and synchronizes the final watched state to a connected tracking service.
 
 The first integration target is:
 
@@ -20,7 +20,7 @@ WatchRelay is not a video player, streaming service, media catalog, downloader, 
 - Android TV and Google TV with proper D-pad/focus support.
 - Background tracking with minimal user interaction after setup.
 - Movies and TV episodes.
-- Configurable watched threshold, with 80% as the default target.
+- Configurable watched threshold, with 80% as the default.
 - Watched progress based on actual viewed intervals rather than only the final playback position.
 - Local history, offline queue, retry, and undo.
 - Conservative content matching: ambiguous matches require confirmation instead of creating a wrong history entry.
@@ -28,90 +28,125 @@ WatchRelay is not a video player, streaming service, media catalog, downloader, 
 
 ## MyShows integration
 
-WatchRelay is designed to work with a regular free MyShows account. It will **not** depend on MyShows Pro and will not use the paid MyShows scrobbling flow (`/scrobble/start`, `/scrobble/pause`, `/scrobble/stop`).
+WatchRelay is designed to work with a regular free MyShows account. It does **not** depend on MyShows Pro and does not use the paid MyShows scrobbling flow (`/scrobble/start`, `/scrobble/pause`, `/scrobble/stop`).
 
-The intended flow is:
+The flow is:
 
 ```text
-playback
-   ↓
-WatchRelay tracks viewed intervals locally
-   ↓
+playback observation
+        ↓
+actual viewed intervals
+        ↓
 watched threshold reached
-   ↓
-resolve MyShows movie / episode
-   ↓
-write the ordinary watched state to MyShows
+        ↓
+conservative MyShows resolution
+        ↓
+local history + durable sync queue
+        ↓
+ordinary MyShows watched state
 ```
 
-For episodes, the integration target is the ordinary watched/unwatched operation. For movies, the target is the ordinary movie status with `finished` representing “watched”. Authentication and API use must remain compatible with the current MyShows service and its terms before a public release.
+For episodes, WatchRelay uses the ordinary watched/unwatched operation. For movies, it uses the ordinary movie status with `finished` representing watched. Authentication and API use must remain compatible with the current MyShows service and its terms before a public release.
 
-Synchronization is designed as durable **at-least-once state synchronization**. WatchRelay prevents duplicate local queue entries for the same operation. If the app dies after MyShows accepts a state mutation but before local success is committed, the same state-setting request can be retried; MyShows does not expose a server-side idempotency key, so exact-once network delivery cannot be guaranteed honestly. Equivalent retries must converge on the same remote state.
+Synchronization is durable **at-least-once state synchronization**. WatchRelay prevents duplicate local queue entries for the same operation. If the app dies after MyShows accepts a state mutation but before local success is committed, the equivalent state-setting request may be retried because MyShows does not expose a server-side idempotency key. Repeated requests therefore have to converge on the same remote state.
 
-## Playback detection
+## Playback observation and external-player bridge
 
-The preferred integration order is:
+WatchRelay currently implements two complementary Android paths:
 
-1. Android `MediaSession` metadata and playback state.
-2. Metadata/intent hand-off when LazyMedia Deluxe launches an external player.
-3. A WatchRelay bridge mode for supported external players if that materially improves reliable identification.
+1. background observation of active `MediaSession` / `MediaController` state after the user grants notification-listener access;
+2. a narrow `video/*` external-player relay that can receive a playback request from a source application, extract only allowlisted identification metadata, and immediately forward the original transient intent to a user-selected installed video player.
+
+The MediaSession adapter uses monotonic Android time for playback accounting and projects stale `PlaybackState.position` from `lastPositionUpdateTime` and playback speed. Wall-clock time is kept separate and is used only for history timestamps.
+
+The external-player relay remembers only the selected player package and safe content metadata such as title, year, season/episode, IMDb/Kinopoisk identifiers, and media type when supplied. Playback URLs, stream/torrent locations, credentials, and raw intents are not persisted. Safe bridge metadata expires quickly and is consumed only by the intended player session.
 
 Accessibility-based observation is **not** a default architecture choice and must not be added unless cleaner Android media APIs are proven insufficient and the privacy/UX trade-off is explicitly justified.
 
+## Android MVP currently implemented
+
+The `v0.4` development line now contains the product-facing phone/tablet shell and the end-to-end software pipeline needed for device validation:
+
+- Home / Setup / History / Settings / Diagnostics surfaces;
+- notification-listener setup and refresh after returning from Android settings;
+- regular MyShows account connection with Android Keystore-backed token storage and explicit disconnect;
+- background MediaSession polling with per-session playback pipelines;
+- viewed-interval accounting, pause/resume, seek handling, playback-speed support, item changes, abrupt end handling, and configurable watched threshold;
+- safe external-player relay with remembered player selection and an in-app reset option;
+- allowlisted external-intent metadata extraction without persisted playback URLs;
+- conservative movie/show/episode matching using saved mappings, external IDs, title/year evidence, and exact season/episode coordinates;
+- durable ambiguous-match and retry-required attention items that survive process restart;
+- user candidate selection before synchronization when a match is ambiguous;
+- local Room-backed history and durable sync queue;
+- pending, authentication-required, failed, synced, undo-pending, and undone states;
+- WorkManager network-constrained synchronization with retry/backoff;
+- safe movie/episode undo based on the previous remote state;
+- configurable watched threshold from 50% to 100%, default 80%;
+- redacted diagnostic export containing aggregate/app/device state but no titles, credentials, playback metadata, history content, or URLs;
+- Room 3 schema export configured through the official Room Gradle plugin;
+- CI verification for unit tests, lint, debug build, signed release AAB/APK, Google Play bundle checks, ABI/native inspection, signing checks, and 16 KB package/native alignment requirements.
+
+The current development build identifies itself as `0.4.0-dev` (`versionCode = 4`).
+
+## Matching and failure behavior
+
+Matching deliberately prefers a missed mark over a wrong one. Evidence priority is saved user mapping, external IDs, title/year evidence, and exact episodic coordinates. Unknown media type is not silently assumed to be a movie.
+
+A completed watch can end in one of these paths:
+
+```text
+strong match      → durable sync queue
+ambiguous match   → Needs attention → user selection → durable sync queue
+network/catalog   → Retry required → retry later
+insufficient data → unresolved / no automatic write
+```
+
+If catalog lookup fails after a valid watched threshold has already been reached, the completed-watch decision is persisted as a retry-required attention item rather than discarded. User-confirmed mappings are reused on later equivalent metadata, while previous remote state is read fresh before a synchronized mark so undo does not rely on stale state.
+
 ## Planned supported playback paths
 
-The initial technical validation covers:
+Real-device validation is still required for:
 
 - LazyMedia Deluxe built-in player;
-- VLC;
-- MX Player;
-- ViMu;
+- LazyMedia Deluxe → VLC;
+- LazyMedia Deluxe → MX Player;
+- LazyMedia Deluxe → ViMu;
 - Android MediaSession behavior on phones/tablets and Android TV/Google TV.
 
-Actual support is recorded only after real-device validation. See [Compatibility](docs/COMPATIBILITY.md).
+**Implementation is not a compatibility claim.** Actual support is recorded only after a reproducible real-device result is added to [Compatibility](docs/COMPATIBILITY.md). Follow [Phase 0 testing](docs/PHASE0-TESTING.md) for the validation protocol.
 
-## Current technical proof
+## Android baseline
 
-The repository contains a minimal Phase 0 Android diagnostic app, the playback core, durable synchronization, and the conservative content-matching core. Automatic tracking is not yet wired into a complete production UI flow. The current build provides:
+The current baseline is:
 
-- MediaSession inspection after the user grants Android notification-listener access;
-- sanitized inspection of `video/*` intents sent to WatchRelay as an external-player handler;
-- a MyShows Free diagnostic flow for authentication, movie watched/undo, and episode watched/undo without Pro scrobble endpoints;
-- deterministic playback-session accounting based on actual viewed intervals, with conservative seek detection, pause/resume, playback speed, duplicate/stale callback protection, stop/replay handling, autoplay item transitions, and an 80% default watched threshold;
-- Room-backed local watch history and durable pending-sync queue with atomic history/enqueue and terminal-outcome writes;
-- deterministic local sync-operation IDs, retryable/auth-required/permanent-failure states, and explicit movie/episode undo operations;
-- WorkManager network-constrained synchronization with exponential backoff and startup recovery after process restart;
-- Android Keystore-backed AES-256-GCM tracker-token storage;
-- metadata normalization for common movie/episode labels and filenames, including season/episode coordinates and release-noise cleanup;
-- MyShows movie/show/episode resolution with IMDb/Kinopoisk external IDs first and conservative title/year fallback;
-- confidence-based matching with explicit `confirmed`, `ambiguous`, and `unresolved` outcomes; low-confidence or competing candidates cannot auto-sync;
-- persistent local user-confirmed mappings for ambiguous items, with fresh remote previous-state lookup before every synchronized mark so undo does not rely on stale state;
-- deterministic matcher tests plus sanitized MyShows response fixtures;
-- Android phone/tablet and Android TV/Google TV launcher entry points;
-- CI verification for unit tests, lint, a debug build, signed release AAB/APK builds, and Google Play packaging constraints.
+- `minSdk = 26`;
+- `targetSdk = 36`;
+- `compileSdk = 37`;
+- JDK 17;
+- Kotlin 2.4.10;
+- Android Gradle Plugin 9.3.1;
+- Gradle 9.5.0 wrapper;
+- Compose BOM 2026.08.00;
+- Room 3.0.2.
 
-The UI for selecting an ambiguous match is intentionally part of the Android MVP phase. Until that UI exists, the matching core exposes candidates and a programmatic confirm/forget path without silently guessing.
-
-Follow [Phase 0 testing](docs/PHASE0-TESTING.md) for real-device validation. Until results are recorded there and in the compatibility matrix, no LMD/player path is advertised as supported.
-
-The Android baseline is `minSdk = 26`, `targetSdk = 36`, and `compileSdk = 37`, using JDK 17, Kotlin 2.4.10, Android Gradle Plugin 9.3.1, Gradle 9.5.0 in CI, and the stable Compose August 2026 BOM. Android 16/API 36 is kept as the target behavior until Android 17 target-specific behavior has been explicitly validated; compiling against API 37 does not by itself raise the runtime requirement.
+Android 16/API 36 remains the target behavior until Android 17 target-specific behavior has been explicitly validated; compiling against API 37 does not itself raise the runtime requirement.
 
 ## Release and Google Play
 
 The primary release artifact is a **signed Android App Bundle (`.aab`)** for Google Play. A signed APK may also be produced as a secondary artifact for direct installation or GitHub distribution.
 
-WatchRelay contains no project-owned NDK code, but the current AndroidX/Compose graph transitively packages `libandroidx.graphics.path.so` for `arm64-v8a`, `armeabi-v7a`, `x86_64`, and `x86`. AAB ABI splitting is explicitly enabled so a Play installation receives only its matching native ABI. CI requires `arm64-v8a`, validates all packaged 64-bit ELF `LOAD` segments for at least 16 KB alignment, validates the AAB as `PAGE_ALIGNMENT_16K`, and applies the 16 KB `zipalign` check to signed release APKs.
+WatchRelay contains no project-owned NDK code, but the current dependency graph can package native AndroidX libraries. AAB ABI splitting is enabled. CI requires `arm64-v8a`, checks packaged 64-bit ELF load alignment for 16 KB memory pages, validates the AAB as `PAGE_ALIGNMENT_16K`, and applies the 16 KB `zipalign` check to signed release APKs.
 
-Release signing uses CI secrets only; signing keys and passwords are never stored in Git. See [Android release requirements](docs/RELEASE.md).
+Release signing uses environment/CI secrets only; signing keys and passwords are never stored in Git. See [Android release requirements](docs/RELEASE.md).
 
 ## Product principles
 
 - **Free:** no WatchRelay subscription and no required MyShows Pro subscription.
 - **Local-first:** playback analysis and local history stay on the device unless synchronization requires a third-party request.
-- **Private:** no WatchRelay cloud account or telemetry is required by the product design.
+- **Private:** no WatchRelay cloud account or required telemetry.
 - **Small:** avoid speculative features and infrastructure.
 - **Reliable:** a missed automatic mark is preferable to a wrong mark.
-- **Independent:** integrations are adapters, so additional playback sources or tracker services can be added later without redefining the product.
+- **Independent:** integrations stay behind narrow boundaries so future sources/providers do not redefine the product.
 
 ## Non-goals
 
@@ -121,38 +156,38 @@ A future discovery/catalog product may be built separately, but it is intentiona
 
 ## Architecture
 
-The intended high-level flow is:
-
 ```text
-Playback source
-      ↓
-Playback adapter
-      ↓
-Playback session / viewed intervals
-      ↓
-Content matcher
-      ↓
-Local history + sync queue
-      ↓
-Tracker provider (initially MyShows)
+Playback source / external-player intent
+                ↓
+        playback adapter
+                ↓
+ viewed-interval session engine
+                ↓
+        content matcher
+          ↙          ↘
+confirmed        needs attention
+    ↓                 ↓
+local history + durable sync queue
+                ↓
+      tracker provider (MyShows)
 ```
 
 See [Architecture](docs/ARCHITECTURE.md) for boundaries and design constraints.
 
 ## Roadmap
 
-The project begins with a technical proof before the product UI:
+The project is developed behind explicit release gates:
 
-1. Validate LMD/player metadata and MediaSession behavior on real Android and TV devices.
-2. Validate the complete free-account MyShows movie/episode write flow.
-3. Build the playback/session core and durable local sync queue.
-4. Build conservative content matching.
-5. Ship the Android MVP, including ambiguous-match resolution UI.
-6. Complete Android TV/Google TV UX and pairing.
-7. Build a tested compatibility matrix and harden reliability.
-8. Public beta, then v1.0.
+1. real-device technical validation of LMD/player observation and ordinary MyShows writes;
+2. playback/session core;
+3. durable persistence and synchronization;
+4. conservative content matching;
+5. Android MVP and real-device end-to-end validation;
+6. first-class Android TV/Google TV UX;
+7. compatibility hardening;
+8. public beta, then v1.0.
 
-See [Roadmap](docs/ROADMAP.md) for release gates and detailed phases.
+See [Roadmap](docs/ROADMAP.md) for detailed phases and release gates.
 
 ## Documentation
 
