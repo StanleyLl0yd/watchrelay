@@ -202,6 +202,18 @@ interface SyncQueueStore {
         error: String?,
     )
     suspend fun updateHistoryState(eventId: String, state: HistorySyncState)
+
+    suspend fun recordOutcome(
+        mutation: PendingMutation,
+        queueState: SyncQueueState,
+        historyState: HistorySyncState?,
+        attemptedAtMs: Long,
+        error: String?,
+    ) {
+        recordAttempt(mutation, queueState, attemptedAtMs, error)
+        if (historyState != null) updateHistoryState(mutation.eventId, historyState)
+    }
+
     suspend fun resumeProvider(provider: TrackerProvider): Int
     suspend fun historyById(eventId: String): StoredWatch?
     suspend fun pendingCount(): Int
@@ -250,6 +262,23 @@ class RoomSyncQueueStore(
 
     override suspend fun updateHistoryState(eventId: String, state: HistorySyncState) {
         dao.updateHistoryState(eventId, state.name)
+    }
+
+    override suspend fun recordOutcome(
+        mutation: PendingMutation,
+        queueState: SyncQueueState,
+        historyState: HistorySyncState?,
+        attemptedAtMs: Long,
+        error: String?,
+    ) {
+        dao.recordOutcome(
+            operationId = mutation.operationId,
+            eventId = mutation.eventId,
+            queueState = queueState.name,
+            historyState = historyState?.name,
+            attemptedAtMs = attemptedAtMs,
+            error = error,
+        )
     }
 
     override suspend fun resumeProvider(provider: TrackerProvider): Int = dao.resumeProvider(provider.name)
@@ -332,44 +361,47 @@ class SyncQueueProcessor(
             val attemptedAt = nowMs()
             when (val result = executor.execute(mutation)) {
                 SyncExecutionResult.Success -> {
-                    store.recordAttempt(mutation, SyncQueueState.SUCCEEDED, attemptedAt, null)
-                    store.updateHistoryState(
-                        mutation.eventId,
-                        if (mutation.purpose == SyncPurpose.UNDO) {
+                    store.recordOutcome(
+                        mutation = mutation,
+                        queueState = SyncQueueState.SUCCEEDED,
+                        historyState = if (mutation.purpose == SyncPurpose.UNDO) {
                             HistorySyncState.UNDONE
                         } else {
                             HistorySyncState.SYNCED
                         },
+                        attemptedAtMs = attemptedAt,
+                        error = null,
                     )
                     processedAny = true
                 }
                 is SyncExecutionResult.RetryableFailure -> {
-                    store.recordAttempt(
-                        mutation,
-                        SyncQueueState.PENDING,
-                        attemptedAt,
-                        result.message,
+                    store.recordOutcome(
+                        mutation = mutation,
+                        queueState = SyncQueueState.PENDING,
+                        historyState = null,
+                        attemptedAtMs = attemptedAt,
+                        error = result.message,
                     )
                     return QueueDrainResult.RETRY
                 }
                 is SyncExecutionResult.AuthenticationRequired -> {
-                    store.recordAttempt(
-                        mutation,
-                        SyncQueueState.AUTH_REQUIRED,
-                        attemptedAt,
-                        result.message,
+                    store.recordOutcome(
+                        mutation = mutation,
+                        queueState = SyncQueueState.AUTH_REQUIRED,
+                        historyState = HistorySyncState.AUTH_REQUIRED,
+                        attemptedAtMs = attemptedAt,
+                        error = result.message,
                     )
-                    store.updateHistoryState(mutation.eventId, HistorySyncState.AUTH_REQUIRED)
                     return QueueDrainResult.AUTH_REQUIRED
                 }
                 is SyncExecutionResult.PermanentFailure -> {
-                    store.recordAttempt(
-                        mutation,
-                        SyncQueueState.FAILED,
-                        attemptedAt,
-                        result.message,
+                    store.recordOutcome(
+                        mutation = mutation,
+                        queueState = SyncQueueState.FAILED,
+                        historyState = HistorySyncState.FAILED,
+                        attemptedAtMs = attemptedAt,
+                        error = result.message,
                     )
-                    store.updateHistoryState(mutation.eventId, HistorySyncState.FAILED)
                     processedAny = true
                 }
             }
