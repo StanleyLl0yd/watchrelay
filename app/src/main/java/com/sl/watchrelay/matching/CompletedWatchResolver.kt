@@ -6,7 +6,7 @@ import com.sl.watchrelay.sync.WatchSyncCoordinator
 import java.io.IOException
 
 sealed interface CompletedWatchResolution {
-    data class Synced(val result: ContentMatchResult.Confirmed) : CompletedWatchResolution
+    data class Queued(val result: ContentMatchResult.Confirmed) : CompletedWatchResolution
     data class NeedsConfirmation(val pending: PendingMatch) : CompletedWatchResolution
     data class RetryRequired(val pending: PendingMatch) : CompletedWatchResolution
     data class Unresolved(val reason: String) : CompletedWatchResolution
@@ -43,7 +43,7 @@ class CompletedWatchResolver(
             is ContentMatchResult.Confirmed -> {
                 enqueue(decision, result)
                 pendingStore.remove(decision.eventId)
-                CompletedWatchResolution.Synced(result)
+                CompletedWatchResolution.Queued(result)
             }
 
             is ContentMatchResult.Ambiguous -> {
