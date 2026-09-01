@@ -60,6 +60,10 @@ class MyShowsFreeClient {
                 method = "shows.Search",
                 params = JSONObject().put("query", query.trim()),
             ),
+            "shows",
+            "results",
+            "items",
+            "list",
         )
     }
 
@@ -86,13 +90,16 @@ class MyShowsFreeClient {
 
     fun findByExternalId(source: String, id: String): Result<MyShowsCatalogItem?> = runCatching {
         require(source in setOf("imdb", "kinopoisk")) { "Unsupported external ID source: $source" }
-        require(id.isNotBlank()) { "External ID is required" }
-        val rawId: Any = id.toLongOrNull() ?: id
+        val normalized = when (source) {
+            "imdb" -> id.trim().lowercase().removePrefix("tt")
+            else -> id.trim()
+        }
+        val numericId = normalized.toLongOrNull() ?: return@runCatching null
         MyShowsResponseParser.catalogItem(
             rpc(
                 token = null,
                 method = "shows.GetByExternalId",
-                params = JSONObject().put("source", source).put("id", rawId),
+                params = JSONObject().put("source", source).put("id", numericId),
             ),
         )
     }
