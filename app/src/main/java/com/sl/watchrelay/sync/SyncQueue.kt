@@ -105,7 +105,11 @@ data class SyncMutation(
             val value: String?
             when (history.remoteType) {
                 RemoteMediaType.EPISODE -> {
-                    type = SyncOperationType.UNCHECK_EPISODE
+                    type = when (history.previousRemoteState) {
+                        EPISODE_WATCHED_STATE -> SyncOperationType.CHECK_EPISODE
+                        EPISODE_UNWATCHED_STATE -> SyncOperationType.UNCHECK_EPISODE
+                        else -> error("Previous episode state is required for safe undo")
+                    }
                     value = null
                 }
                 RemoteMediaType.MOVIE -> {
@@ -162,6 +166,8 @@ data class SyncMutation(
 
         const val MOVIE_WATCHED_STATUS = "finished"
         const val MOVIE_REMOVE_STATUS = "remove"
+        const val EPISODE_WATCHED_STATE = "watched"
+        const val EPISODE_UNWATCHED_STATE = "unwatched"
     }
 }
 
@@ -244,6 +250,15 @@ class RoomSyncQueueStore(
     override suspend fun enqueueUndo(eventId: String, createdAtMs: Long): Boolean {
         val history = historyById(eventId) ?: return false
         if (history.syncState == HistorySyncState.UNDONE || history.syncState == HistorySyncState.UNDO_PENDING) {
+            return false
+        }
+        if (
+            history.remoteType == RemoteMediaType.EPISODE &&
+            history.previousRemoteState !in setOf(
+                SyncMutation.EPISODE_WATCHED_STATE,
+                SyncMutation.EPISODE_UNWATCHED_STATE,
+            )
+        ) {
             return false
         }
         return dao.enqueueUndo(eventId, SyncMutation.forUndo(history, createdAtMs).toEntity())
