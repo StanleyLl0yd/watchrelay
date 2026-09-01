@@ -78,7 +78,7 @@ fun WatchRelayScreen(
         }
     }
 
-    fun runMatchAction(action: suspend () -> Unit) {
+    fun runAction(action: suspend () -> Unit) {
         scope.launch {
             busy = true
             runCatching { action() }
@@ -115,7 +115,7 @@ fun WatchRelayScreen(
         Text("WatchRelay", style = MaterialTheme.typography.headlineMedium)
         Text("Automatic watch tracking companion")
 
-        SectionNavigation(section = section, onSelect = { section = it })
+        SectionNavigation(selected = section, onSelect = { section = it })
         HorizontalDivider()
 
         if (busy && snapshot == null) Text("Loading…")
@@ -126,19 +126,13 @@ fun WatchRelayScreen(
                 snapshot = snapshot,
                 notificationAccess = notificationAccess,
                 onRefresh = ::refresh,
-                onSync = {
-                    scope.launch {
-                        runCatching { repository.syncNow() }
-                            .onFailure { error = it.message ?: it.javaClass.simpleName }
-                        refresh()
-                    }
-                },
+                onSync = { runAction { repository.syncNow() } },
                 onSetup = { section = AppSection.SETUP },
-                onRetryMatch = { eventId -> runMatchAction { repository.retryMatch(eventId) } },
+                onRetryMatch = { eventId -> runAction { repository.retryMatch(eventId) } },
                 onConfirmMatch = { eventId, candidateIndex ->
-                    runMatchAction { repository.confirmMatch(eventId, candidateIndex) }
+                    runAction { repository.confirmMatch(eventId, candidateIndex) }
                 },
-                onDismissMatch = { eventId -> runMatchAction { repository.dismissMatch(eventId) } },
+                onDismissMatch = { eventId -> runAction { repository.dismissMatch(eventId) } },
             )
 
             AppSection.SETUP -> SetupSection(
@@ -165,15 +159,7 @@ fun WatchRelayScreen(
                         refresh()
                     }
                 },
-                onDisconnect = {
-                    scope.launch {
-                        busy = true
-                        runCatching { repository.disconnect() }
-                            .onFailure { error = it.message ?: it.javaClass.simpleName }
-                        busy = false
-                        refresh()
-                    }
-                },
+                onDisconnect = { runAction { repository.disconnect() } },
             )
 
             AppSection.HISTORY -> HistorySection(
@@ -183,7 +169,7 @@ fun WatchRelayScreen(
                         busy = true
                         runCatching { repository.undo(eventId) }
                             .onSuccess { enqueued ->
-                                if (!enqueued) error = "Undo is not available for this item."
+                                error = if (enqueued) null else "Undo is not available for this item."
                             }
                             .onFailure { error = it.message ?: it.javaClass.simpleName }
                         busy = false
@@ -195,15 +181,7 @@ fun WatchRelayScreen(
             AppSection.SETTINGS -> SettingsSection(
                 initialThreshold = snapshot?.watchedThresholdPercent
                     ?: AppSettings.DEFAULT_THRESHOLD_PERCENT,
-                onSave = { value ->
-                    scope.launch {
-                        busy = true
-                        runCatching { repository.setWatchedThresholdPercent(value) }
-                            .onFailure { error = it.message ?: it.javaClass.simpleName }
-                        busy = false
-                        refresh()
-                    }
-                },
+                onSave = { value -> runAction { repository.setWatchedThresholdPercent(value) } },
             )
 
             AppSection.DIAGNOSTICS -> DiagnosticsSection(
