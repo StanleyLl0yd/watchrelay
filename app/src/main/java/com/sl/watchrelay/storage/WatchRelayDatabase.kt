@@ -119,7 +119,16 @@ abstract class WatchStoreDao {
     @Query(
         """
         UPDATE watch_history
-        SET syncState = 'PENDING'
+        SET syncState = CASE
+            WHEN EXISTS (
+                SELECT 1 FROM pending_sync
+                WHERE pending_sync.eventId = watch_history.eventId
+                    AND pending_sync.provider = :provider
+                    AND pending_sync.state = 'AUTH_REQUIRED'
+                    AND pending_sync.purpose = 'UNDO'
+            ) THEN 'UNDO_PENDING'
+            ELSE 'PENDING'
+        END
         WHERE provider = :provider AND syncState = 'AUTH_REQUIRED'
         """,
     )
