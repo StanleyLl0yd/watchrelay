@@ -14,7 +14,12 @@ fun interface CompletedDecisionResolver {
 data class PlaybackTrackingInput(
     val observation: PlaybackObservation,
     val metadata: PlaybackMetadata,
-)
+    val wallClockMs: Long = observation.observedAtMs,
+) {
+    init {
+        require(wallClockMs >= 0)
+    }
+}
 
 data class PlaybackTrackingUpdate(
     val engineUpdate: PlaybackEngineUpdate,
@@ -39,16 +44,13 @@ class PlaybackTrackingPipeline(
             engineUpdate.completed?.let { completed ->
                 resolution = resolveIfNeeded(previousContext, completed, force = true)
             }
-            context = if (observation.status == PlaybackStatus.STOPPED) {
-                null
-            } else {
-                SessionContext.create(observation, input.metadata)
-            }
+            context = if (observation.status == PlaybackStatus.STOPPED) null else SessionContext.create(input)
         } else if (previousContext == null && observation.status != PlaybackStatus.STOPPED) {
-            context = SessionContext.create(observation, input.metadata)
-        } else if (previousContext != null && observation.observedAtMs >= previousContext.lastMetadataAtMs) {
+            context = SessionContext.create(input)
+        } else if (previousContext != null && observation.observedAtMs >= previousContext.lastObservationAtMs) {
             previousContext.metadata = mergeMetadata(previousContext.metadata, input.metadata)
-            previousContext.lastMetadataAtMs = observation.observedAtMs
+            previousContext.lastObservationAtMs = observation.observedAtMs
+            previousContext.lastWallClockMs = input.wallClockMs
         }
 
         val activeContext = context
@@ -81,7 +83,7 @@ class PlaybackTrackingPipeline(
                 itemKey = session.itemKey,
                 viewedMs = snapshot.viewedMs,
                 durationMs = snapshot.durationMs,
-                watchedAtMs = session.lastMetadataAtMs,
+                watchedAtMs = session.lastWallClockMs,
                 metadata = session.metadata,
             ),
         )
@@ -94,16 +96,18 @@ class PlaybackTrackingPipeline(
         val itemKey: String,
         val eventId: String,
         var metadata: PlaybackMetadata,
-        var lastMetadataAtMs: Long,
+        var lastObservationAtMs: Long,
+        var lastWallClockMs: Long,
         var lastResolutionSignature: String? = null,
         var delivered: Boolean = false,
     ) {
         companion object {
-            fun create(observation: PlaybackObservation, metadata: PlaybackMetadata) = SessionContext(
-                itemKey = observation.itemKey,
-                eventId = eventId(observation.itemKey, observation.observedAtMs),
-                metadata = metadata,
-                lastMetadataAtMs = observation.observedAtMs,
+            fun create(input: PlaybackTrackingInput) = SessionContext(
+                itemKey = input.observation.itemKey,
+                eventId = eventId(input.observation.itemKey, input.wallClockMs),
+                metadata = input.metadata,
+                lastObservationAtMs = input.observation.observedAtMs,
+                lastWallClockMs = input.wallClockMs,
             )
 
             private fun eventId(itemKey: String, startedAtMs: Long): String {
