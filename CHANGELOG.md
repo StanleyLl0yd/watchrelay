@@ -14,8 +14,14 @@ The project is currently in pre-release development; versioned release sections 
 - Compatibility tracking document.
 - Repository agent rules and mandatory full-audit/refactoring protocol.
 - PolyForm Noncommercial License 1.0.0.
+- Phase 0 Android diagnostic application for Android, Android TV, and Google TV.
+- MediaSession inspection with notification-listener access.
+- Sanitized external-player intent probe for LazyMedia Deluxe investigation.
+- Non-Pro MyShows diagnostic flow for authentication, movie watched/undo, and episode watched/undo validation.
+- GitHub Actions CI and Dependabot configuration for the Android project.
+- Real-device Phase 0 test plan.
 
 ### Status
 
 - No production-ready Android application has been released yet.
-- Phase 0 technical validation is the next implementation milestone.
+- Phase 0 technical validation is in progress; no player path is considered supported until real-device results are recorded.
