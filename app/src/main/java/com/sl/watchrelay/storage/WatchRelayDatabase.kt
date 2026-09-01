@@ -97,7 +97,7 @@ abstract class WatchStoreDao {
         WHERE operationId = :operationId
         """,
     )
-    protected abstract suspend fun recordAttempt(
+    abstract suspend fun recordAttempt(
         operationId: String,
         state: String,
         attemptedAtMs: Long,
@@ -105,7 +105,7 @@ abstract class WatchStoreDao {
     )
 
     @Query("UPDATE watch_history SET syncState = :state WHERE eventId = :eventId")
-    protected abstract suspend fun updateHistoryState(eventId: String, state: String)
+    abstract suspend fun updateHistoryState(eventId: String, state: String)
 
     @Transaction
     open suspend fun recordOutcome(
