@@ -22,7 +22,7 @@ class PlaybackTrackingPipelineTest {
         val decisions = mutableListOf<String>()
         val pipeline = PlaybackTrackingPipeline(0.8) { decision ->
             decisions += decision.eventId
-            confirmedMovie()
+            queuedMovie()
         }
         val metadata = PlaybackMetadata(title = "Dune", year = 2021, mediaKind = SourceMediaKind.MOVIE)
 
@@ -32,7 +32,7 @@ class PlaybackTrackingPipelineTest {
         pipeline.accept(input(9_000, 9_000, PlaybackStatus.PLAYING, metadata))
         pipeline.accept(input(9_000, 10_000, PlaybackStatus.STOPPED, metadata))
 
-        assertTrue(threshold.resolution is CompletedWatchResolution.Synced)
+        assertTrue(threshold.resolution is CompletedWatchResolution.Queued)
         assertEquals(1, decisions.size)
         assertTrue(decisions.single().startsWith("watch-"))
     }
@@ -88,7 +88,7 @@ class PlaybackTrackingPipelineTest {
         var resolvedTitle: String? = null
         val pipeline = PlaybackTrackingPipeline(0.8) { decision ->
             resolvedTitle = decision.metadata.title
-            confirmedMovie()
+            queuedMovie()
         }
 
         pipeline.accept(input(0, 0, PlaybackStatus.PLAYING, PlaybackMetadata(title = null)))
@@ -128,7 +128,7 @@ class PlaybackTrackingPipelineTest {
         metadata = metadata,
     )
 
-    private fun confirmedMovie() = CompletedWatchResolution.Synced(
+    private fun queuedMovie() = CompletedWatchResolution.Queued(
         ContentMatchResult.Confirmed(
             content = ResolvedContent(
                 target = TrackerTarget(
