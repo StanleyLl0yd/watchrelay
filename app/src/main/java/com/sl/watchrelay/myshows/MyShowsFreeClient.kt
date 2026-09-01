@@ -1,6 +1,5 @@
 package com.sl.watchrelay.myshows
 
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.URL
@@ -55,20 +54,20 @@ class MyShowsFreeClient {
 
     fun searchShows(query: String): Result<List<MyShowsCatalogItem>> = runCatching {
         require(query.isNotBlank()) { "Search query is required" }
-        extractArray(
+        MyShowsResponseParser.catalogItems(
             rpc(
                 token = null,
                 method = "shows.Search",
                 params = JSONObject().put("query", query.trim()),
             ),
-        ).toCatalogItems()
+        )
     }
 
     fun searchMovies(query: String, year: Int?): Result<List<MyShowsCatalogItem>> = runCatching {
         require(query.isNotBlank()) { "Search query is required" }
         val search = JSONObject().put("query", query.trim())
         if (year != null) search.put("year", year)
-        extractArray(
+        MyShowsResponseParser.catalogItems(
             rpc(
                 token = null,
                 method = "movies.GetCatalog",
@@ -82,19 +81,20 @@ class MyShowsFreeClient {
             "results",
             "items",
             "list",
-        ).toCatalogItems()
+        )
     }
 
     fun findByExternalId(source: String, id: String): Result<MyShowsCatalogItem?> = runCatching {
         require(source in setOf("imdb", "kinopoisk")) { "Unsupported external ID source: $source" }
         require(id.isNotBlank()) { "External ID is required" }
         val rawId: Any = id.toLongOrNull() ?: id
-        val result = rpc(
-            token = null,
-            method = "shows.GetByExternalId",
-            params = JSONObject().put("source", source).put("id", rawId),
+        MyShowsResponseParser.catalogItem(
+            rpc(
+                token = null,
+                method = "shows.GetByExternalId",
+                params = JSONObject().put("source", source).put("id", rawId),
+            ),
         )
-        (result as? JSONObject)?.toCatalogItem()
     }
 
     fun readShowEpisodes(showId: Int): Result<List<MyShowsEpisode>> = runCatching {
@@ -106,44 +106,17 @@ class MyShowsFreeClient {
                 .put("withEpisodes", true)
                 .put("withSeasonCounts", false),
         )
-        val array = result.optJSONArray("episodes") ?: JSONArray()
-        buildList {
-            for (index in 0 until array.length()) {
-                val item = array.optJSONObject(index) ?: continue
-                val episodeId = item.positiveInt("episodeId", "id") ?: continue
-                val season = item.nonNegativeInt("seasonNumber", "season") ?: continue
-                val episode = item.positiveInt("episodeNumber", "episode") ?: continue
-                add(
-                    MyShowsEpisode(
-                        showId = showId,
-                        episodeId = episodeId,
-                        seasonNumber = season,
-                        episodeNumber = episode,
-                        title = item.stringOrNull("title"),
-                    ),
-                )
-            }
-        }
+        MyShowsResponseParser.episodes(showId, result)
     }
 
     fun readProfileWatchedEpisodeIds(token: String, showId: Int): Result<Set<Int>> = runCatching {
-        val array = extractArray(
+        MyShowsResponseParser.watchedEpisodeIds(
             rpc(
                 token = token,
                 method = "profile.Episodes",
                 params = JSONObject().put("showId", showId),
             ),
-            "episodes",
-            "results",
-            "items",
-            "list",
         )
-        buildSet {
-            for (index in 0 until array.length()) {
-                val item = array.optJSONObject(index) ?: continue
-                item.positiveInt("episodeId", "id")?.let(::add)
-            }
-        }
     }
 
     fun readMovieState(token: String, movieId: Int): Result<MovieState> = runCatching {
@@ -221,49 +194,8 @@ class MyShowsFreeClient {
         return response.opt("result")
     }
 
-    private fun extractArray(result: Any?, vararg keys: String): JSONArray = when (result) {
-        is JSONArray -> result
-        is JSONObject -> keys.firstNotNullOfOrNull(result::optJSONArray) ?: JSONArray()
-        else -> JSONArray()
-    }
-
-    private fun JSONArray.toCatalogItems(): List<MyShowsCatalogItem> = buildList {
-        for (index in 0 until length()) {
-            optJSONObject(index)?.toCatalogItem()?.let(::add)
-        }
-    }
-
-    private fun JSONObject.toCatalogItem(): MyShowsCatalogItem? {
-        val id = positiveInt("id", "showId", "movieId") ?: return null
-        return MyShowsCatalogItem(
-            id = id,
-            title = stringOrNull("title", "name"),
-            originalTitle = stringOrNull("titleOriginal", "originalTitle", "original_name", "original_title"),
-            year = positiveInt("year", "releaseYear"),
-            imdbId = stringOrNull("imdbId", "imdb_id"),
-            kinopoiskId = stringOrNull("kinopoiskId", "kinopoisk_id"),
-        )
-    }
-
-    private fun JSONObject.stringOrNull(vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
+    private fun JSONObject.stringOrNull(key: String): String? =
         optString(key).takeIf { it.isNotBlank() && it != "null" }
-    }
-
-    private fun JSONObject.positiveInt(vararg keys: String): Int? = keys.firstNotNullOfOrNull { key ->
-        when (val value = opt(key)) {
-            is Number -> value.toInt().takeIf { it > 0 }
-            is String -> value.toIntOrNull()?.takeIf { it > 0 }
-            else -> null
-        }
-    }
-
-    private fun JSONObject.nonNegativeInt(vararg keys: String): Int? = keys.firstNotNullOfOrNull { key ->
-        when (val value = opt(key)) {
-            is Number -> value.toInt().takeIf { it >= 0 }
-            is String -> value.toIntOrNull()?.takeIf { it >= 0 }
-            else -> null
-        }
-    }
 
     private fun post(
         endpoint: String,
