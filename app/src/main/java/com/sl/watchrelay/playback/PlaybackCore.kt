@@ -51,14 +51,12 @@ data class PlaybackEngineUpdate(
 class PlaybackEngine(
     watchedThreshold: Double = DEFAULT_WATCHED_THRESHOLD,
     private val seekToleranceMs: Long = DEFAULT_SEEK_TOLERANCE_MS,
-    private val relativeTimingTolerance: Double = DEFAULT_RELATIVE_TIMING_TOLERANCE,
 ) {
     private val watchedThreshold = watchedThreshold.also { require(it > 0.0 && it <= 1.0) }
     private var activeSession: Session? = null
 
     init {
         require(seekToleranceMs >= 0)
-        require(relativeTimingTolerance >= 0.0)
     }
 
     fun accept(observation: PlaybackObservation): PlaybackEngineUpdate {
@@ -102,6 +100,8 @@ class PlaybackEngine(
 
         fun accept(observation: PlaybackObservation) {
             require(observation.itemKey == itemKey)
+            if (observation.observedAtMs < previous.observedAtMs) return
+
             durationMs = max(durationMs, observation.durationMs)
             becameWatched = false
 
@@ -111,12 +111,8 @@ class PlaybackEngine(
                 val end = observation.positionMs.coerceAtMost(durationLimit())
                 val positionDelta = end - start
                 val expectedDelta = (elapsedMs * previous.playbackSpeed).roundToLong()
-                val tolerance = max(
-                    seekToleranceMs,
-                    (expectedDelta * relativeTimingTolerance).roundToLong(),
-                )
 
-                if (positionDelta > 0 && abs(positionDelta - expectedDelta) <= tolerance) {
+                if (positionDelta > 0 && abs(positionDelta - expectedDelta) <= seekToleranceMs) {
                     intervals.add(start, end)
                 }
             }
@@ -206,6 +202,5 @@ class PlaybackEngine(
     companion object {
         const val DEFAULT_WATCHED_THRESHOLD = 0.8
         const val DEFAULT_SEEK_TOLERANCE_MS = 2_000L
-        const val DEFAULT_RELATIVE_TIMING_TOLERANCE = 0.25
     }
 }
