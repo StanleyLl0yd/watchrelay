@@ -92,6 +92,34 @@ class PlaybackEngineTest {
     }
 
     @Test
+    fun staleCallbackFromPreviousItemDoesNotReplaceCurrentSession() {
+        val engine = PlaybackEngine()
+
+        engine.accept(observation(item = "episode-a", position = 0, time = 0))
+        engine.accept(observation(item = "episode-a", position = 20_000, time = 20_000))
+        val transition = engine.accept(
+            observation(item = "episode-b", position = 0, time = 21_000),
+        )
+        val stale = engine.accept(
+            observation(
+                item = "episode-a",
+                position = 20_000,
+                time = 20_000,
+                status = PlaybackStatus.STOPPED,
+            ),
+        )
+        val current = engine.accept(
+            observation(item = "episode-b", position = 10_000, time = 31_000),
+        ).active!!
+
+        assertEquals("episode-a", transition.completed!!.itemKey)
+        assertEquals("episode-b", transition.active!!.itemKey)
+        assertNull(stale.completed)
+        assertEquals("episode-b", stale.active!!.itemKey)
+        assertEquals(10_000L, current.viewedMs)
+    }
+
+    @Test
     fun abruptStopClosesSessionWithoutFalseWatchedDecision() {
         val engine = PlaybackEngine()
 
