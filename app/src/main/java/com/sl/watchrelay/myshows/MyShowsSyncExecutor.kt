@@ -35,7 +35,10 @@ class MyShowsSyncExecutor(
 
     private fun classifyFailure(error: Throwable): SyncExecutionResult = when (error) {
         is MyShowsHttpException -> when (error.statusCode) {
-            401, 403 -> SyncExecutionResult.AuthenticationRequired(error.message.orEmpty())
+            401, 403 -> {
+                tokenStore.clear()
+                SyncExecutionResult.AuthenticationRequired(error.message.orEmpty())
+            }
             408, 425, 429 -> SyncExecutionResult.RetryableFailure(error.message.orEmpty())
             in 500..599 -> SyncExecutionResult.RetryableFailure(error.message.orEmpty())
             else -> SyncExecutionResult.PermanentFailure(error.message.orEmpty())
